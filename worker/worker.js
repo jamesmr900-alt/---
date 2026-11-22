@@ -1,4 +1,4 @@
-/* Cloudflare Worker — прокси между страницей ассистента и Claude API.
+/* Прокси (Vercel: api/chat.js; Cloudflare Worker: этот файл целиком) — прокси между страницей ассистента и Claude API.
    Ключ Anthropic хранится только здесь (секрет ANTHROPIC_API_KEY), в браузер не попадает.
    Страница присылает историю диалога; инструкция (system) и список инструментов задаются здесь,
    поэтому прокси нельзя использовать как «бесплатный Claude» для посторонних задач.
@@ -139,14 +139,15 @@ export default {
   async fetch(req, env) {
     const origin = req.headers.get('Origin') || '';
     const allowed = (env.ALLOWED_ORIGINS || '*').split(',').map(s => s.trim()).filter(Boolean);
-    const okOrigin = allowed.includes('*') || allowed.includes(origin);
+    const self = new URL(req.url).origin;
+    const okOrigin = allowed.includes('*') || allowed.includes(origin) || !origin || origin === self;
     const cors = { 'Access-Control-Allow-Origin': okOrigin ? (origin || '*') : allowed[0], 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'content-type, x-access-code', 'Access-Control-Max-Age': '86400', 'Vary': 'Origin' };
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const url = new URL(req.url);
-    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/health'))
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname.endsWith('/health')))
       return json({ ok: true, model: env.MODEL || 'claude-sonnet-5-5', access_code: !!env.ACCESS_CODE, key: !!env.ANTHROPIC_API_KEY }, 200, cors);
-    if (req.method !== 'POST' || url.pathname !== '/chat') return json({ error: { message: 'not found' } }, 404, cors);
+    if (req.method !== 'POST' || !url.pathname.endsWith('/chat')) return json({ error: { message: 'not found' } }, 404, cors);
     if (!okOrigin) return json({ error: { message: 'Этот сайт не подключён к прокси (ALLOWED_ORIGINS).' } }, 403, cors);
     if (!env.ANTHROPIC_API_KEY) return json({ error: { message: 'В прокси не задан ключ ANTHROPIC_API_KEY.' } }, 500, cors);
     if (env.ACCESS_CODE && req.headers.get('x-access-code') !== env.ACCESS_CODE) return json({ error: { message: 'Нужен код доступа.', code: 'access' } }, 401, cors);

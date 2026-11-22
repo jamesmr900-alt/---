@@ -2,8 +2,7 @@
 
 Пробная версия комплектатора с подключением к ИИ и отдельным инструментам.
 
-- Ассистент (ИИ): https://jamesmr900-alt.github.io/---/
-- Инструменты без ИИ: https://jamesmr900-alt.github.io/---/tools.html
+Рабочий адрес — после развёртывания на Vercel (см. ниже): `https://<проект>.vercel.app/` и `/tools.html`.
 
 Две страницы, работают по ссылке без регистрации:
 
@@ -17,42 +16,36 @@
 ## Как устроено
 
 ```
-Посетитель ──► GitHub Pages (index.html, tools.html, каталог, расчёты в браузере)
+Посетитель ──► Vercel / GitHub Pages (index.html, tools.html, каталог, расчёты в браузере)
                    │  только страница ассистента
                    ▼
-            Cloudflare Worker (worker/worker.js) — хранит ключ, инструкцию, лимиты
+            Прокси /api/chat (Vercel) или Cloudflare Worker — хранит ключ, инструкцию, лимиты
                    ▼
               Claude API (Anthropic)
 ```
 
 Ключ API в браузер не попадает. Инструкция ассистента и список инструментов зашиты в прокси, поэтому прокси нельзя использовать для посторонних задач. Каталог, расчёты и КП работают в браузере: ассистент вызывает их как инструменты.
 
-## Развёртывание (≈ 15 минут)
+## Развёртывание на Vercel (вход через GitHub, ≈ 10 минут)
+Vercel хранит сайт и прокси вместе: обе страницы и `/api/chat` на одном адресе.
+1. Откройте vercel.com → **Sign Up** → **Continue with GitHub** (тот же аккаунт, что владеет репозиторием).
+2. **Add New… → Project** → в списке репозиториев выберите `---` → **Import**.
+3. На экране настройки: Framework Preset — **Other**, остальное не трогать. Раскройте **Environment Variables** и добавьте:
+   - `ANTHROPIC_API_KEY` = ключ с console.anthropic.com (API Keys; на балансе должны быть средства).
+   - по желанию: `MODEL` (`claude-sonnet-5-5` по умолчанию, `claude-opus-5-5` — точнее и дороже), `DAILY_LIMIT` (150), `ACCESS_CODE`.
+4. **Deploy**. Через минуту появится адрес вида `https://имя-проекта.vercel.app`:
+   - ассистент — `https://имя-проекта.vercel.app/`
+   - инструменты — `https://имя-проекта.vercel.app/tools.html`
+   - проверка прокси — `https://имя-проекта.vercel.app/api/health` (должно быть `"key":true`).
+5. Дальше каждый коммит в `main` обновляет сайт автоматически. Ключ поменять: Settings → Environment Variables → Redeploy.
 
-### 1. Сайт на GitHub Pages
-1. Создайте репозиторий, например `jamesmr900-alt/---`.
-2. Загрузите в него **содержимое** этой папки: `index.html` и `tools.html` должны лежать в корне.
-3. Settings → Pages → Source: *Deploy from a branch*, ветка `main`, папка `/ (root)` → Save.
-4. Через минуту сайт откроется по адресу `https://jamesmr900-alt.github.io/---/`. Страница «Инструменты» работает сразу.
+Важно: бесплатный тариф Vercel Hobby — для некоммерческого и тестового использования. Для рабочего сервиса компании нужен тариф Pro.
 
-### 2. Прокси на Cloudflare (бесплатный тариф)
-1. Зарегистрируйтесь на dash.cloudflare.com → Workers & Pages → Create → *Create Worker*. Назовите его, например, `maytoni-agent` → Deploy.
-2. Edit code → замените код содержимым `worker/worker.js` → Deploy.
-3. Settings → Variables and Secrets:
-   - `ANTHROPIC_API_KEY` — **Secret**, ключ с console.anthropic.com (раздел API Keys; на счёте должны быть средства);
-   - `ALLOWED_ORIGINS` — `https://jamesmr900-alt.github.io` (адрес сайта без пути);
-   - по желанию: `MODEL` (по умолчанию `claude-sonnet-5-5`; точнее, но дороже — `claude-opus-5-5`), `DAILY_LIMIT` (запросов с одного IP в сутки, по умолчанию 150), `MAX_TOKENS` (4096), `ACCESS_CODE` (если нужен код доступа).
-4. Для лимитов, общих для всех серверов Cloudflare (рекомендуется): Storage → KV → создайте пространство, затем в настройках воркера Bindings → KV namespace с именем переменной `RL`.
-5. Проверьте: откройте `https://maytoni-agent.<аккаунт>.workers.dev/health` — должно быть `"ok":true,"key":true`.
+## Вариант: GitHub Pages (только «Инструменты»)
+Settings → Pages → Source: *Deploy from a branch*, `main`, `/ (root)` → Save. Через пару минут: `https://jamesmr900-alt.github.io/---/tools.html`. Ассистент на этом адресе без нейросети.
 
-Вместо панели можно развернуть через консоль: `cd worker && npx wrangler deploy`, затем `npx wrangler secret put ANTHROPIC_API_KEY`.
-
-### 3. Связать сайт с прокси
-В `js/config.js` впишите адрес воркера:
-```js
-window.MAYTONI_CONFIG = { workerUrl: 'https://maytoni-agent.<аккаунт>.workers.dev' };
-```
-Закоммитьте — через минуту ассистент заработает.
+## Вариант: прокси на Cloudflare Worker
+Код `worker/worker.js` целиком вставляется в Cloudflare Worker (секрет `ANTHROPIC_API_KEY`, переменная `ALLOWED_ORIGINS`), адрес воркера — в `js/config.js`.
 
 ## Сколько стоит
 GitHub Pages и Cloudflare Workers (до 100 000 запросов в сутки) — бесплатно. Платите только за Claude API по тарифу Anthropic: один диалог с проверкой КП — это несколько запросов к модели. Расходы ограничивают `DAILY_LIMIT` и лимит расходов в console.anthropic.com (Settings → Limits) — его стоит выставить обязательно.
@@ -87,7 +80,9 @@ data/catalog.json   каталог Maytoni (10 601 позиция, РРЦ 2026)
 vendor/xlsx.full.min.js  SheetJS 0.18.5 (Apache-2.0) — чтение и запись xlsx
 vendor/three.module.min.js, OrbitControls.js  three.js 0.170 (MIT) — 3D
 vendor/pdf.min.js, pdf.worker.min.js  PDF.js 3.11 (Apache-2.0) — текст из PDF
-worker/worker.js    прокси Cloudflare: инструкция ассистента, инструменты, лимиты
+worker/worker.js    прокси: инструкция ассистента, инструменты, лимиты (Vercel и Cloudflare)
+api/chat.js, api/health.js  функции Vercel, вызывают worker/worker.js
+vercel.json, package.json   настройки Vercel
 worker/wrangler.toml
 scripts/build_catalog.py  сборка каталога из прайс-листов
 ```
