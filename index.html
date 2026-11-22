@@ -180,8 +180,10 @@
     search_catalog: i => MT.search(i.query || '', { group: i.group, kind: i.kind, cap: i.cap, color: i.color, ip: i.ip_min, maxPrice: i.max_price, priced: i.priced_only !== false },
       Math.min(i.limit || 15, 40)).map(short),
     get_items: i => (i.articles || []).slice(0, 60).map(a => short(MT.get(a)) || { article: a, error: 'нет в каталоге' }),
+    find_analogs_by_description: i => { const r = MT.analogsBySpec(String(i.description || ''), Math.min(i.limit || 6, 15));
+      return { type: r.kind || null, features: r.features, note: r.note || undefined, analogs: (r.list || []).map(o => Object.assign(short(o.item), { exact: o.exact, score: o.score, matches: o.why, critical_differences: o.hard, other_differences: o.soft })) }; },
     find_analogs: i => { const r = MT.analogs(i.article, Math.min(i.limit || 8, 20), { sameSeries: i.other_series_only ? false : true });
-      return r.base ? { base: short(r.base), class: r.cls, analogs: r.list.map(o => Object.assign(short(o.item), { similarity: o.score, why: o.why })) } : { error: 'артикул не найден' }; },
+      return r.base ? { base: short(r.base), type: r.kind, features: r.features, note: r.note || undefined, analogs: r.list.map(o => Object.assign(short(o.item), { exact: o.exact, score: o.score, matches: o.why, critical_differences: o.hard, other_differences: o.soft })) } : { error: 'артикул не найден' }; },
     list_norms: () => MT.NORMS,
     room_calc: i => { const c = MTUI.roomCalc({ room: i.room, L: i.length, W: i.width, H: i.height, E: i.target_lux, fixture: i.fixture && MT.get(i.fixture) ? i.fixture : null,
       mount: i.mount, cap: i.cap, existing: i.existing_count, source: i.source, lm: i.source_flux, ang: i.source_angle, Ke: i.maintenance_factor, dimmable: i.dimmable });
@@ -220,7 +222,7 @@
     kp_set: i => { kp.set((i.rows || []).map(r => ({ room: r.room, a: r.article, qty: r.qty })), i.title); return TOOLS.kp_get(); },
     kp_add: i => { kp.add((i.rows || []).map(r => ({ room: r.room, a: r.article, qty: r.qty }))); return TOOLS.kp_get(); },
   };
-  const TOOL_LABEL = { search_catalog: 'ищу в каталоге', get_items: 'проверяю артикулы', find_analogs: 'подбираю аналоги', list_norms: 'смотрю нормы',
+  const TOOL_LABEL = { search_catalog: 'ищу в каталоге', get_items: 'проверяю артикулы', find_analogs: 'подбираю аналоги', find_analogs_by_description: 'подбираю аналоги по описанию', list_norms: 'смотрю нормы',
     room_calc: 'считаю освещённость', show_3d: 'строю 3D-визуализацию', check_kp_zones: 'проверяю КП по зонам', kp_get: 'смотрю КП', kp_set: 'собираю КП', kp_add: 'добавляю в КП' };
 
   /* ---------- Диалог ---------- */

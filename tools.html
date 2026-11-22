@@ -82,10 +82,10 @@
         <div class="row"><input id="aArt" style="flex:1" placeholder="DL048-01W, P044PL-01-30GU10-W, 725013">
           <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="aOther"> другие серии</label>
           <button class="b" id="aGo">Подобрать</button></div>
-        <p class="mute">Правила: декоративные — вид, цвет, размер, форма, количество плафонов; технические — поток, угол, мощность, цветовая температура; блоки питания и управление — функции и параметры, габариты в последнюю очередь.</p>
+        <p class="mute">Порядок подбора: 1) тот же тип устройства — обязательно; 2) функции: протокол управления (DALI, TRIAC, Zigbee…), RGBW/RGB/MIX, цветовая температура, цоколь, напряжение; 3) цвет; 4) размеры. Если полного аналога нет — показываются ближайшие с отличиями.</p>
       </div>
       <div class="card"><h3>По описанию или из файла (Excel, PDF)</h3>
-        <textarea id="aList" rows="5" style="width:100%" placeholder="Каждая строка — одна позиция: артикул или описание с параметрами, например:
+        <textarea id="aList" rows="5" style="width:100%" placeholder="Каждая строка — одна позиция: артикул или описание, начиная с типа устройства, например:
 Светильник встраиваемый поворотный белый GU10 Ø85 мм 12 шт
 Трековый однофазный черный 20Вт 4000K 36° 1800лм
 Подвесной латунь 3*E14 D600
@@ -197,14 +197,16 @@
 
   /* ---- Аналоги ---- */
   const cl = { decor: 'декоративный', tech: 'технический', control: 'оборудование / управление', source: 'источник света' };
-  const anRow = o => `<tr><td><b>${o.score}%</b></td><td>${esc(o.item.a)}</td><td>${esc(o.item.n || '')}</td><td>${esc(o.item.col || '')}</td><td class="num">${o.item.w ?? ''}</td><td class="num">${[o.item.h, o.item.dm || o.item.l, o.item.wd].filter(Boolean).join('×')}</td><td class="num">${rub(o.item.p)}</td><td class="mute">${esc(o.why.join(', '))}</td><td><button class="b sm" data-add="${esc(o.item.a)}">+ КП</button></td></tr>`;
-  const anHead = '<tr><th>Сходство</th><th>Артикул</th><th>Наименование</th><th>Цвет</th><th class="num">Вт</th><th class="num">Размер, мм</th><th class="num">РРЦ</th><th>Почему</th><th></th></tr>';
+  const diffHTML = o => [...o.hard.map(d => `<span style="color:var(--bad)">✗ ${esc(d)}</span>`), ...o.soft.map(d => `<span style="color:#9a6b00">≈ ${esc(d)}</span>`)].join('<br>');
+  const anRow = o => `<tr><td>${o.exact ? '<span class="pill ok">аналог</span>' : o.hard.length ? '<span class="pill bad">ближайший</span>' : '<span class="pill new">с отличиями</span>'}<br><b>${o.score}%</b></td><td>${esc(o.item.a)}</td><td>${esc(o.item.n || '')}</td><td>${esc(o.item.col || '')}</td><td class="num">${[o.item.h, o.item.dm || o.item.l, o.item.wd].filter(Boolean).join('×')}</td><td class="num">${rub(o.item.p)}</td><td class="mute">${esc(o.why.join(', '))}</td><td>${diffHTML(o) || '<span class="mute">—</span>'}</td><td><button class="b sm" data-add="${esc(o.item.a)}">+ КП</button></td></tr>`;
+  const anHead = '<tr><th>Итог</th><th>Артикул</th><th>Наименование</th><th>Цвет</th><th class="num">Размер, мм</th><th class="num">РРЦ</th><th>Совпадает</th><th>Отличия</th><th></th></tr>';
+  const featHTML = r => { const f = r.features || {}; return `<p class="mute">Тип: <b>${esc(r.kind || '—')}</b>${f.protocol && f.protocol.length ? ' · управление: ' + esc(f.protocol.join(', ')) : ''}${f.mode ? ' · ' + esc(f.mode) : ''}${f.cct ? ' · Tцв ' + esc(f.cct) : ''}${f.cap ? ' · цоколь ' + esc(f.cap) : ''}${f.volt ? ' · ' + esc(f.volt) + ' В' : ''}${f.color ? ' · цвет ' + esc(f.color) : ''}</p>`; };
   function runAn() {
     const r = MT.analogs($('#aArt').value, 12, { sameSeries: $('#aOther').checked ? false : true });
     $('#aOut').hidden = false;
     if (!r.base) { $('#aOut').innerHTML = '<p class="mute">Артикул не найден в каталоге. Если это изделие другого бренда — впишите его описание справа.</p>'; return; }
-    $('#aOut').innerHTML = `<h3>${esc(r.base.a)} · ${esc(r.base.n || '')}</h3><p class="mute">Класс: ${cl[r.cls]}. ${rub(r.base.p)}</p>` +
-      (r.list.length ? '<div class="scroll"><table class="t">' + anHead + r.list.map(anRow).join('') + '</table></div>' : '<p class="mute">Подходящих аналогов того же типа в прайсе нет.</p>');
+    $('#aOut').innerHTML = `<h3>${esc(r.base.a)} · ${esc(r.base.n || '')}</h3>${featHTML(r)}<p class="mute">${rub(r.base.p)}</p>` + (r.note ? `<div class="note" style="margin-bottom:8px">${esc(r.note)}</div>` : '') +
+      (r.list.length ? '<div class="scroll"><table class="t">' + anHead + r.list.map(anRow).join('') + '</table></div>' : '');
     bindRowBtns($('#aOut'));
   }
   $('#aGo').onclick = runAn; $('#aArt').onkeydown = e => { if (e.key === 'Enter') runAn(); };
@@ -245,9 +247,10 @@
     const box = $('#aListOut'); box.hidden = false;
     let h = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">Подбор по списку: ${listRes.length} поз.</h3><button class="b" id="aAll">Выбранные → в КП</button></div><div class="scroll" style="max-height:none"><table class="t"><tr><th>Исходная позиция</th><th>Распознано</th><th>Варианты Maytoni (выберите)</th><th class="num">Кол-во</th></tr>`;
     listRes.forEach((x, i) => {
-      const sp = x.r.spec, chips = sp.article ? `<span class="pill new">артикул ${esc(sp.article)}</span>` :
-        Object.keys(SPEC_LABEL).filter(k => k !== 'qty' && sp[k] != null).map(k => `<span class="pill">${SPEC_LABEL[k]}: ${esc(sp[k])}</span>`).join(' ') || '<span class="pill bad">нет параметров</span>';
-      const opts = x.r.list.map((o, j) => `<label style="flex-direction:row;align-items:flex-start;gap:6px;color:var(--ink);font-size:13px;margin-bottom:3px"><input type="radio" style="width:auto;margin-top:3px" name="ap${i}" value="${j}" ${j === 0 ? 'checked' : ''}><span><b>${esc(o.item.a)}</b> · ${esc(o.item.n || '')} · ${rub(o.item.p)} <span class="mute">${o.score}%${o.why.length ? ' — ' + esc(o.why.slice(0, 3).join(', ')) : ''}</span></span></label>`).join('');
+      const sp = x.r.spec, chips = sp.article ? `<span class="pill new">артикул ${esc(sp.article)}</span>` : !x.r.kind ? '<span class="pill bad">тип не определён</span>' : `<span class="pill">тип: ${esc(x.r.kind)}</span> ` +
+        Object.keys(SPEC_LABEL).filter(k => k !== 'qty' && k !== 'kind' && sp[k] != null).map(k => `<span class="pill">${SPEC_LABEL[k]}: ${esc(sp[k])}</span>`).join(' ') || '<span class="pill bad">нет параметров</span>';
+      const tag = o => o.exact ? '<span class="pill ok">аналог</span>' : o.hard.length ? '<span class="pill bad">ближайший</span>' : '<span class="pill new">с отличиями</span>';
+      const opts = (x.r.note ? `<div class="mute" style="margin-bottom:4px">${esc(x.r.note)}</div>` : '') + x.r.list.map((o, j) => `<label style="flex-direction:row;align-items:flex-start;gap:6px;color:var(--ink);font-size:13px;margin-bottom:5px"><input type="radio" style="width:auto;margin-top:3px" name="ap${i}" value="${j}" ${j === 0 ? 'checked' : ''}><span>${tag(o)} <b>${esc(o.item.a)}</b> · ${esc(o.item.n || '')} · ${rub(o.item.p)}${diffHTML(o) ? '<br><span style="font-size:12px">' + diffHTML(o) + '</span>' : ''}</span></label>`).join('');
       h += `<tr><td style="max-width:280px">${esc(x.line.slice(0, 160))}</td><td style="max-width:220px">${chips}</td><td>${opts || '<span class="mute">нет подходящих</span>'}</td><td class="num"><input type="number" min="0" style="width:60px" data-q="${i}" value="${sp.qty || 1}"></td></tr>`;
     });
     box.innerHTML = h + '</table></div>';
