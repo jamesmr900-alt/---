@@ -17,6 +17,7 @@
       <label>Цвет подвесов и бра<select id="wAcc"><option value="">как корпус</option><option>латунь</option><option>золото</option><option>черный</option><option>белый</option></select></label>
       <label>Управление светом<select id="wCtl"><option value="none">без управления</option><option>Zigbee</option><option>DALI</option><option>Wi-Fi</option><option>RF</option><option>TRIAC</option></select></label>
       <label>Трековая система (если есть трек)<select id="wSys"></select></label>
+      <label title="Для систем 24/48 В (Exility, Exility X, Levity, Flarity, Arity)">Блоки питания трека<select id="wPsu"><option>авто</option><option>встраиваемый</option><option>выносной</option></select></label>
       <label>&nbsp;<button class="b" id="wGo">Подобрать 3 варианта</button></label>
     </div>
     <p class="mute" style="margin-top:8px">Тип общего света: «авто» — по потолку (ГКЛ и натяжной — встраиваемые, бетон — накладные), или задайте сами. «Безрамочные»: на ГКЛ — светильники под шпаклёвку (TRS), на натяжном — безрамочные Neo, Intro, Intro 2.0; без галочки — обычные встраиваемые. Премиум-вариант — светильники со встроенным LED. Лента подбирается по назначению (профиль — только для световой линии). Трек: выберите форму (линия, Г, П, квадрат) и впишите длины сторон через запятую; монтаж «авто» — встраиваемый в ГКЛ, в натяжной потолок или накладной на бетон. Светильники трека подбираются из этой системы по освещённости и с выбранным управлением; трек и лента учитываются в освещённости, поэтому общего света ставится меньше или не ставится совсем. Количество: «авто» — по освещённости, или впишите число в «Общий свет, шт» / «Трек: светильников, шт». Модель: впишите артикул, и он будет во всех трёх вариантах; пусто — подбирается по уровню цены. Любую позицию в результате можно заменить кнопкой «заменить». Правила: шаг ~1,5 м, количество — по норме СП 52; в утопленные — лампы 38–40° или модули до 60°; во влажные помещения — IP44+. Подвесы над столом — по одному на ~60 см.</p>
@@ -51,7 +52,7 @@
   $('#wGo').onclick = () => {
     const rr = rooms.filter(r => r.name).map(r => ({ name: r.name, L: num(r.L), W: num(r.W), S: num(r.S), H: num(r.H) || 2.75, ceiling: r.ceiling, mount: r.mount, frameless: !!r.frameless, model: (r.model || '').trim(), color: r.color, table: num(r.table), island: num(r.island), stripUse: r.stripUse, strip: num(r.strip), trackShape: r.trackShape, trackSides: r.trackSides, trackMount: r.trackMount, nGeneral: num(r.nGeneral), nTrack: num(r.nTrack), bra: num(r.bra), accentColor: $('#wAcc').value || null }));
     if (!rr.length) { $('#wOut').innerHTML = '<div class="card mute">Добавьте помещения.</div>'; return; }
-    glob = { cct: +$('#wCct').value, control: $('#wCtl').value, trackSystem: $('#wSys').value };
+    glob = { cct: +$('#wCct').value, control: $('#wCtl').value, trackSystem: $('#wSys').value, trackPsu: $('#wPsu').value };
     res = KITS.wizard(rr, glob);
     MTUI.TS.wizard = { rooms: rr, res };
     render();

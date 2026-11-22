@@ -155,22 +155,35 @@
     const s = {}; all().filter(x => MT.kind(x) === 'шинопровод' && x.c).forEach(x => { s[x.c] = (s[x.c] || 0) + 1; });
     return Object.keys(s).sort();
   }
+  /** Напряжение трековой системы: 48 В — Exility, Exility X (Mini); 24 В — Levity, Flarity, Arity; остальные — по светильникам и блокам системы; 0 — сеть 230 В. */
+  const SYSV = [['EXILITY X', 48], ['EXILITY MINI', 48], ['EXILITY IP', 48], ['EXILITY', 48], ['LEVITY', 24], ['FLARITY', 24], ['ARITY', 24]];
+  function sysVolt(sys, parts) {
+    const k = SYSV.find(([n]) => new RegExp('\\b' + n + '$', 'i').test(sys)); if (k) return k[1];
+    if (/UNITY|TRINITY|AXITY/i.test(sys)) return 0;
+    const cnt = {}; (parts || systemParts(sys)).forEach(x => { const m = nameOf(x).match(/\b(24|48)\s*В(?!т)/); if (m) cnt[m[1]] = (cnt[m[1]] || 0) + 1; });
+    all().filter(x => MT.kind(x) === 'блок питания' && String(x.comp || '').split(/;\s*/).includes(sys)).forEach(x => { const m = nameOf(x).match(/\b(24|48)\s*В(?!т)/); if (m) cnt[m[1]] = (cnt[m[1]] || 0) + 3; });
+    const best = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0]; return best ? +best[0] : 0;
+  }
   function systemParts(sys) { return all().filter(x => x.c === sys); }
   /** o: {system, mount:'накладной'|'подвесной'|'встраиваемый'|'натяжной', color, runs:[м], L, T, X, fixtures:[{a,qty}], auto:{count, cct, w}, tier, room} */
   function trackCalc(o) {
     const tier = o.tier || 'средний', warn = [], rows = [], parts = systemParts(o.system), room = o.room || '';
     if (!parts.length) return { error: 'Выберите трековую систему' };
     const inb = /встраив/i, wantIn = o.mount === 'встраиваемый';   // в натяжной потолок — обычный шинопровод в профиле для натяжного потолка
-    const mountOk = x => wantIn ? inb.test(nameOf(x)) || !/накладн/i.test(nameOf(x)) : !inb.test(nameOf(x));
+    const hang = /подвесн|кругл/i, wantHang = o.mount === 'подвесной';
+    const mountOk = x => { const n = nameOf(x); if (wantIn) return (inb.test(n) || !/накладн/i.test(n)) && !hang.test(n); if (wantHang) return !inb.test(n); return !inb.test(n) && !hang.test(n); };
     const col = o.color;
     const pick = (re, not, kinds = ['комплектующие', 'аксессуар']) => {
       let c = parts.filter(x => kinds.includes(MT.kind(x)) && re.test(nameOf(x)) && !(not && not.test(nameOf(x))));
       const m = c.filter(mountOk); if (m.length) c = m;
+      if (wantHang) { const h = c.filter(x => hang.test(nameOf(x))); if (h.length) c = h; }
       const k = c.filter(x => colorOk(x, col)); if (k.length) c = k;
       return pickTier(c, 'бюджет');
     };
     let rails = parts.filter(x => MT.kind(x) === 'шинопровод' && x.l >= 500);
     const rm = rails.filter(mountOk); if (rm.length) rails = rm; else warn.push(`В системе нет шинопровода для монтажа «${o.mount}» — взят другой.`);
+    if (wantIn) { const r2 = rails.filter(x => !/шпаклев/i.test(nameOf(x))); if (r2.length) rails = r2; }
+    if (wantHang) { const r2 = rails.filter(x => hang.test(nameOf(x))); if (r2.length) rails = r2; }
     const rc = rails.filter(x => colorOk(x, col)); if (rc.length) rails = rc; else if (col) warn.push(`Шинопровода цвета «${col}» нет.`);
     const lens = {}; rails.forEach(x => { const L = Math.round(x.l / 500) * 0.5; if (!lens[L] || lens[L].p > x.p) lens[L] = x; });
     const sizes = Object.keys(lens).map(Number).sort((a, b) => b - a);
@@ -190,11 +203,21 @@
     add(pick(/коннектор\s+прямой|прямой\s+коннектор|соединитель\s+прямой/i, /питани/i), joins, 'стыки шинопровода', 'Прямой коннектор в системе не найден.');
     add(pick(/l-образн|угловой\s+коннектор|коннектор\s+угловой|угол-соединитель|угловой\s+соединитель/i, /питани|внутренн/i), +o.L || 0, 'углы 90°', 'L-коннектор (угол) в системе не найден.');
     add(pick(/[тt]-образн/i, /питани/i), +o.T || 0, 'Т-соединения', 'T-коннектор в системе не найден.');
+    // Exility, Exility X, Levity, Basity: механический коннектор не передаёт питание — к каждому нужен коннектор питания того же вида.
+    // Unity, Trinity, Axity: коннектор сразу и механический, и питания (2 в 1) — ничего не добавляем.
+    const sepPower = !/UNITY|TRINITY|AXITY/i.test(o.system) && parts.some(x => /коннектор\s+питани|коннектор\s+питани/i.test(nameOf(x)) && !/ввод/i.test(nameOf(x)));
+    if (sepPower) {
+      const pc = (re, not) => { const all = parts.filter(x => ['комплектующие', 'аксессуар'].includes(MT.kind(x)) && re.test(nameOf(x)) && !/ввод|радиус/i.test(nameOf(x)) && !(not && not.test(nameOf(x))));
+        let c = all.filter(x => !/гибк/i.test(nameOf(x))); if (!c.length) c = all; const k = c.filter(x => colorOk(x, col)); if (k.length) c = k; return pickTier(c, 'бюджет'); };
+      add(pc(/коннектор\s+питания\s+прям|прям[а-я]*\s+коннектор\s+питания/i), joins, 'питание через стык (к каждому прямому коннектору)', 'Прямой коннектор питания в системе не найден — без него соседний отрезок шинопровода не получит питание.');
+      add(pc(/коннектор\s+питания\s+углов|углов[а-я]*\s+коннектор\s+питания/i, /внутренн/i), +o.L || 0, 'питание через угол (к каждому угловому коннектору)', 'Угловой коннектор питания в системе не найден — проверьте, как передать питание через угол.');
+      add(pc(/коннектор\s+питания\s+[тt]-?\s*образн|[тt]-?\s*образн[а-я]*\s+коннектор\s+питания/i), +o.T || 0, 'питание через Т-соединение', 'Т-образный коннектор питания в системе не найден.');
+    }
     add(pick(/[хx]-образн/i, /питани/i), +o.X || 0, 'X-соединения', 'X-коннектор в системе не найден.');
-    const feed = pick(/ввод\s+питани|токоподвод|коннектор\s+питани/i, /профил/i); add(feed, 1, 'подключение к сети', 'Ввод питания в системе не найден — проверьте.');
+    const feed = pick(/ввод\s+питани|токоподвод/i, /профил/i) || pick(/коннектор\s+питани/i, /профил|углов|прям|[тt]-?\s*образн/i); add(feed, 1, 'подключение к сети', 'Ввод питания в системе не найден — проверьте.');
     const ends = Math.max(0, 2 * runs.length - 2 * (+o.L || 0) - 3 * (+o.T || 0) - 4 * (+o.X || 0) - (feed ? 1 : 0));
     add(pick(/заглуш/i, /профил/i), ends, 'свободные концы', 'Заглушки в системе не найдены — проверьте.');
-    if (o.mount === 'подвесной') add(pick(/подвес|трос/i, /светильник/i), runs.reduce((t, r) => t + Math.ceil(r / 1.5) + 1, 0), 'подвес каждые ~1,5 м', 'Подвесы в системе не найдены.');
+    if (o.mount === 'подвесной') add(pick(/подвес|трос/i, /светильник|заглуш|коннектор/i, ['комплектующие', 'аксессуар', 'подвесной']), runs.reduce((t, r) => t + Math.ceil(r / 1.5) + 1, 0), 'подвес каждые ~1,5 м', 'Подвесы в системе не найдены.');
     if (o.mount === 'натяжной') { const pr = parts.filter(x => MT.kind(x) === 'профиль' && /натяжн/i.test(nameOf(x)));
       if (pr.length) { const p = pickTier(pr, 'бюджет'); rows.push(row(p, runs.reduce((t, r) => t + Math.ceil(r / (p.l / 1000 || 2)), 0), 'профиль для натяжного потолка', 'Комплектующие')); }
       else warn.push('Профиль для натяжного потолка в системе не найден.'); }
@@ -209,22 +232,31 @@
       if (o.auto.w) { const best = Math.min(...fx.map(x => Math.abs((x.w || 0) - o.auto.w))); fx = fx.filter(x => Math.abs((x.w || 0) - o.auto.w) <= best + 2); }
       const x = pickTier(fx, tier); if (x) { rows.push(row(x, o.auto.count, 'подобран автоматически', 'Светильники')); fixW += (x.w || 0) * o.auto.count; } else warn.push('Трековый светильник с такими параметрами не найден.');
     }
-    // питание низковольтных систем: блоки питания, в совместимости которых указана эта система
-    const own = all().filter(x => MT.kind(x) === 'блок питания' && !/аварийн/i.test(nameOf(x)) && String(x.comp || '').split(/;\s*/).includes(o.system));
-    const low = own.length > 0 || /магнит|низковольт/i.test(o.system);
-    if (low && fixW > 0) {
-      let ps = own.length ? own : all().filter(x => MT.kind(x) === 'блок питания' && /48\s*В|48V/i.test(nameOf(x)));
-      const pr = o.protocol; const byP = pr === 'DALI' ? ps.filter(x => /dali|-DD/i.test(x.a + nameOf(x))) : pr === 'Zigbee' ? ps.filter(x => /smart|-DS/i.test(x.a + nameOf(x))) : ps.filter(x => !/dali|smart|-DD|-DS/i.test(x.a + nameOf(x)));
-      if (byP.length) ps = byP;
+    // питание низковольтных систем (48 В: Exility, Exility X; 24 В: Levity, Flarity, Arity и др.): блоки по мощности светильников
+    const V = sysVolt(o.system, parts);
+    if (V && fixW > 0) {
+      const psV = x => +((nameOf(x).match(/(\d{2})\s*В(?!т)/) || String(x.c || '').match(/(\d{2})\s*В/) || [])[1] || 0);
+      const proto = x => /dali|zigbee|smart|wi-?fi|\brf\b|triac|-DD|-DS|диммир/i.test(x.a + ' ' + nameOf(x));
+      const builtIn = all().filter(x => MT.kind(x) === 'блок питания' && psV(x) === V && /встраив/i.test(nameOf(x)) && String(x.comp || '').split(/;\s*/).includes(o.system) && !/аварийн/i.test(nameOf(x)));
+      const remote = all().filter(x => MT.kind(x) === 'блок питания' && psV(x) === V && !proto(x) && !/встраив|аварийн|[A-Z][a-z]+ity\b/i.test(nameOf(x)) && (o.wet ? true : !/IP\s*6\d/.test(nameOf(x))));
+      const mode = o.psu && o.psu !== 'авто' ? o.psu : (builtIn.length && o.mount !== 'подвесной' ? 'встраиваемый' : 'выносной');
+      let ps = mode === 'встраиваемый' ? builtIn : remote;
+      if (!ps.length) { ps = mode === 'встраиваемый' ? remote : builtIn; if (ps.length) warn.push(mode === 'встраиваемый' ? `Встраиваемого в шинопровод блока ${V} В для системы нет — взят выносной.` : `Выносного блока ${V} В без протокола не нашлось — взят встраиваемый.`); }
+      if (ps === builtIn || mode === 'встраиваемый') {   // протокол управления встроенного блока — как было
+        const pr = o.protocol, byP = pr === 'DALI' ? ps.filter(x => /dali|-DD/i.test(x.a + nameOf(x))) : pr === 'Zigbee' ? ps.filter(x => /smart|-DS/i.test(x.a + nameOf(x))) : ps.filter(x => !proto(x)); if (byP.length) ps = byP; }
       const pc = ps.filter(x => colorOk(x, col)); if (pc.length) ps = pc;
-      const need = fixW * 1.2, maxW = Math.max(...ps.map(x => x.w || 0));
-      if (ps.length && maxW > 0) { const n = Math.ceil(need / maxW), fit = ps.filter(x => x.w >= need / n), p = pickTier(fit.filter(x => x.w <= Math.min(...fit.map(v => v.w)) * 1.5), 'бюджет') || pickTier(fit, 'бюджет');
-        rows.push(row(p, n, `светильники ${Math.round(fixW)} Вт ×1,2${n > 1 ? ', ' + n + ' блока' : ''}`, 'Питание')); }
-      else warn.push('Блок питания 48 В для системы подберите вручную.');
-    }
+      const need = fixW * 1.2, ws = ps.map(x => x.w || 0).filter(Boolean);
+      if (ws.length) {
+        const maxW = Math.max(...ws), n = Math.ceil(need / maxW), per = need / n, fit = ps.filter(x => (x.w || 0) >= per);
+        const p = pickTier(fit.filter(x => x.w <= Math.min(...fit.map(v => v.w)) * 1.5), 'бюджет') || pickTier(fit, 'бюджет');
+        rows.push(row(p, n, `${mode === 'встраиваемый' ? 'встраиваемый в шинопровод' : 'выносной'} ${V} В: светильники ${Math.round(fixW)} Вт ×1,2 = ${Math.round(need)} Вт${n > 1 ? `, ${n} блока по ≤${Math.round(per)} Вт` : ''}`, 'Питание'));
+        if (mode === 'встраиваемый' && n > 1) warn.push(`Встраиваемые блоки: ${n} шт — каждый питает свой участок шинопровода; разделите светильники между ними поровну (не более ${p.w} Вт на блок).`);
+        if (mode === 'выносной') warn.push(`Выносной блок ${V} В ставится в доступном месте (ниша, шкаф) и подключается к вводу питания шинопровода.`);
+      } else warn.push(`Блок питания ${V} В для системы подберите вручную.`);
+    } else if (V && !fixW) warn.push(`Система ${V} В: блок питания рассчитается, когда будут выбраны светильники.`);
     if (cut.length) warn.push('Подрезка шинопровода: ' + cut.join('; ') + '.');
     warn.push('Проверьте по каталогу системы: способ крепления к потолку, тип ввода питания и совместимость с выбранными светильниками.');
-    return { rows: rows.map(r => Object.assign(r, { room })), warn, info: { total, joins, ends, fixW: Math.round(fixW), low } };
+    return { rows: rows.map(r => Object.assign(r, { room })), warn, info: { total, joins, ends, fixW: Math.round(fixW), volt: V || 230 } };
   }
 
 
@@ -388,7 +420,7 @@
           nT = +room.nTrack > 0 ? Math.round(+room.nTrack) : Math.min(nMax, Math.max(nMinT, e.N)); Eextra += e.En(nT); fixtures = [{ a: tf.a, qty: nT }];
           extraNote.push(`трек ${nT} × ${tf.a}${+room.nTrack > 0 ? ' (вручную)' : ''} ≈ ${Math.round(e.En(nT))} лк`);
         } else notes.push(`трек: в системе «${sys}» нет светильника цвета «${col}»${glob.control && glob.control !== 'none' ? ' с управлением ' + glob.control : ''}`);
-        const tr = trackCalc({ system: sys, mount: tm, color: tcol, runs: geo.runs, L: geo.L, fixtures, tier, protocol: glob.control, room: name });
+        const tr = trackCalc({ system: sys, mount: tm, color: tcol, runs: geo.runs, L: geo.L, fixtures, tier, protocol: glob.control, psu: glob.trackPsu, wet: bath, room: name });
         if (tr.rows) tr.rows.forEach(r => rows.push({ a: r.a, qty: r.qty, note: r.note + (r.group === 'Светильники' ? ' — по освещённости' : ''), group: `Трек (${shape}, ${tm})` })); else notes.push(tr.error);
         (tr.warn || []).filter(w => !/Проверьте по каталогу|из другой системы/.test(w)).forEach(w => notes.push('трек: ' + w));
       }

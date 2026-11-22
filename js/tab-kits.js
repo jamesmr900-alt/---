@@ -28,6 +28,7 @@
       <label>Помещение (для КП)<input id="tRoom" placeholder="Кухня"></label>
       <label style="grid-column:span 2">Система<select id="tSys"></select></label>
       <label>Монтаж<select id="tMount">${opt(['накладной', 'подвесной', 'встраиваемый', 'натяжной'], 'накладной')}</select></label>
+      <label title="Для систем 24/48 В: встраиваемый в шинопровод блок системы или выносной блок Maytoni нужного напряжения без протокола">Блоки питания (24/48 В)<select id="tPsu">${opt(['авто', 'встраиваемый', 'выносной'], 'авто')}</select></label>
       <label>Цвет<select id="tCol">${opt([['черн', 'черный'], ['бел', 'белый']], 'черн')}</select></label>
       <label style="grid-column:span 2">Длины линий трека, м (через запятую)<input id="tRuns" value="3.6, 2.2"></label>
       <label>Углы L / T / X<div class="row" style="gap:4px"><input id="tL" type="number" min="0" value="1" style="width:56px"><input id="tT" type="number" min="0" value="0" style="width:56px"><input id="tX" type="number" min="0" value="0" style="width:56px"></div></label>
@@ -67,7 +68,7 @@
     wpm: +$('#lW').value || null, ip: +$('#lIp').value, profile: $('#lProf').value, profileColor: $('#lPCol').value, control: $('#lCtl').value, tier: $('#lTier').value, room: $('#lRoom').value }), $('#lRoom').value);
   $('#tGo').onclick = () => {
     const fixtures = $('#tFix').value.split(/\n/).map(l => l.match(/([A-Za-z0-9][\w.()\-\/]+)\s*[×x*]?\s*(\d+)?/)).filter(Boolean).map(m => ({ a: m[1], qty: +(m[2] || 1) })).filter(f => MT.get(f.a));
-    show($('#tOut'), KITS.trackCalc({ system: $('#tSys').value, mount: $('#tMount').value, color: $('#tCol').value, runs: nums($('#tRuns').value), L: +$('#tL').value, T: +$('#tT').value, X: +$('#tX').value,
+    show($('#tOut'), KITS.trackCalc({ system: $('#tSys').value, mount: $('#tMount').value, psu: $('#tPsu').value, color: $('#tCol').value, runs: nums($('#tRuns').value), L: +$('#tL').value, T: +$('#tT').value, X: +$('#tX').value,
       fixtures, auto: fixtures.length ? null : { count: +$('#tN').value, w: +$('#tW').value, cct: $('#tCct').value }, tier: $('#tTier').value, room: $('#tRoom').value }), $('#tRoom').value);
   };
   $('#daGo').onclick = () => show($('#daOut'), KITS.daliCalc({ devices: +$('#daDev').value, sensors: +$('#daSen').value, panels: +$('#daPan').value, master: $('#daMas').value }), '');
