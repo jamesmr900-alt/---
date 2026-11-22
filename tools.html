@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Maytoni · Инструменты комплектатора</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%23111%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%227%22 fill=%22%23b08d57%22/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/app.css?v=202611222011">
+<link rel="stylesheet" href="css/app.css?v=202611222019">
 </head>
 <body>
 <header class="top">
@@ -70,10 +70,11 @@
           <label id="cSrcArtL" hidden>Артикул источника<input id="cSrcArt" placeholder="3094"></label>
           <label id="cLmL" hidden>Поток, лм<input id="cLm" type="number" value="560"></label>
           <label id="cAngL" hidden>Угол, °<input id="cAng" type="number" value="110"></label>
-          <label>Файл КСС (.ldt)<input id="cLdt" type="file" accept=".ldt,.LDT"></label>
+          <label>Файлы КСС (LDT, IES, ZIP)<input id="cLdt" type="file" multiple accept=".ldt,.LDT,.ies,.IES,.zip"></label>
         </div>
         <div class="row" style="margin-top:12px"><button class="b" id="cGo">Рассчитать</button><button class="b ghost" id="c3d" disabled>3D-вид</button><button class="b ghost" id="cPlan" disabled>В план</button><button class="b ghost" id="cToKp" disabled>Добавить в КП</button><span class="mute" id="cMsg"></span></div>
         <p class="mute" style="margin-top:10px">В утопленные светильники (Reif, Dot) и Share/Flint ставятся только лампы 38–40° или модули до 60°: широкие источники теряют до половины света в корпусе.</p>
+        <p class="mute" id="phStat"></p>
       </div>
       <div class="card"><h3>Результат</h3><div id="cOut" class="mute">Заполните параметры и нажмите «Рассчитать».</div>
         <canvas class="map" id="cMap" hidden></canvas><div class="legend" id="cLeg" hidden>меньше <i></i> больше</div>
@@ -156,13 +157,13 @@
 </main>
 <footer>Цены — РРЦ 2026 из прайс-листов Maytoni. Расчёт оценочный (метод коэффициента использования, СП 52.13330.2016), не заменяет светотехнический проект.</footer>
 
-<script>window.ASSET_V = '202611222011';</script>
+<script>window.ASSET_V = '202611222019';</script>
 <script src="vendor/xlsx.full.min.js"></script>
-<script src="js/engine.js?v=202611222011"></script>
-<script src="js/ui.js?v=202611222011"></script>
-<script src="js/kits.js?v=202611222011"></script>
-<script src="js/docs.js?v=202611222011"></script>
-<script type="module" src="js/viz3d.js?v=202611222011"></script>
+<script src="js/engine.js?v=202611222019"></script>
+<script src="js/ui.js?v=202611222019"></script>
+<script src="js/kits.js?v=202611222019"></script>
+<script src="js/docs.js?v=202611222019"></script>
+<script type="module" src="js/viz3d.js?v=202611222019"></script>
 <script>
 (async function () {
   const { $, esc, rub, kp } = MTUI;
@@ -176,6 +177,9 @@
 
   const n = await MT.loadCatalog('data/catalog.json');
   $('#catState').textContent = `Каталог: ${n.toLocaleString('ru-RU')} позиций (прайс-листы РРЦ 2026 + каталог характеристик).`;
+  const phStat = () => { const all = Object.keys(MT.photometry).length; $('#phStat').innerHTML = `Библиотека КСС: ${all} светильников. Если для светильника есть файл — расчёт берёт его реальную кривую и поток. <a href="#" id="phClr">Убрать мои загруженные</a>`;
+    const c = document.getElementById('phClr'); if (c) c.onclick = async ev => { ev.preventDefault(); await MTUI.clearUserPhotometry(); phStat(); }; };
+  MTUI.loadPhotometry().then(phStat);
 
   /* ---- Каталог ---- */
   const row = x => `<tr><td>${MTUI.img(x, 40)}</td><td><b>${esc(x.a)}</b></td><td>${esc(x.n || '')}</td><td>${esc(x.col || '')}</td><td class="num">${x.w ?? ''}</td><td class="num">${x.lm ?? ''}</td><td class="num">${x.ang ? x.ang + '°' : ''}</td><td>${esc(x.k || '')}</td><td>${esc(x.ip || '')}</td><td>${esc(x.cap || '')}</td><td class="num">${rub(x.p)}</td>
@@ -203,12 +207,23 @@
   $('#cRoom').innerHTML = MT.NORMS.map(x => `<option value="${x.id}">${esc(x.name)} — ${x.E} лк</option>`).join('');
   $('#cRoom').onchange = () => { const x = MT.NORMS.find(v => v.id === $('#cRoom').value); $('#cE').value = x.E; };
   $('#cSrcMode').onchange = () => { const m = $('#cSrcMode').value; $('#cSrcArtL').hidden = m !== 'art'; $('#cLmL').hidden = $('#cAngL').hidden = m !== 'manual'; };
-  $('#cFx').onchange = () => { const x = MT.get($('#cFx').value); if (x) { const p = MT.fixtureProfile(x); $('#cMount').value = p.mount; if (p.cap) $('#cCap').value = p.cap; $('#cMsg').textContent = x.n; } else $('#cMsg').textContent = 'Нет в каталоге — задайте тип установки вручную'; };
+  $('#cFx').onchange = () => { const x = MT.get($('#cFx').value); if (x) { const p = MT.fixtureProfile(x); $('#cMount').value = p.mount; if (p.cap) $('#cCap').value = p.cap; $('#cMsg').textContent = x.n + (MT.photometryFor(x.a) ? ' · есть КСС производителя' : ''); } else $('#cMsg').textContent = 'Нет в каталоге — задайте тип установки вручную'; };
   let ldt = null, lastCalc = null, view3d = null;
   $('#c3d').onclick = () => { if (!window.MT3D) { $('#cMsg').textContent = '3D ещё загружается…'; return; }
     if (view3d) view3d.dispose(); view3d = MT3D.render($('#c3dBox'), MT3D.sceneFromCalc(lastCalc, { title: $('#cName').value || lastCalc.summary.room }));
     $('#c3dBox').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
-  $('#cLdt').onchange = async e => { const f = e.target.files[0]; if (!f) { ldt = null; return; } try { ldt = MT.parseLDT(await f.text()); $('#cMsg').textContent = `КСС: ${ldt.name}, LOR ${ldt.LOR}, угол ≈ ${ldt.beam}°`; } catch (er) { ldt = null; $('#cMsg').textContent = 'Не удалось прочитать LDT'; } };
+  $('#cLdt').onchange = async e => {
+    const fs = [...e.target.files]; if (!fs.length) { ldt = null; return; } e.target.value = ''; $('#cMsg').textContent = 'читаю файлы КСС…';
+    try {
+      const r = await MTUI.importPhotometry(fs);
+      ldt = r.unmatched.length === 1 && !r.added.length ? r.unmatched[0].ph : null;
+      const fx = MT.get($('#cFx').value), hit = fx && MT.photometryFor(fx.a);
+      $('#cMsg').textContent = [r.added.length ? `В библиотеку добавлено: ${r.added.length} (${r.added.slice(0, 4).map(x => x.article).join(', ')}${r.added.length > 4 ? '…' : ''})` : '',
+        ldt ? `файл без артикула в имени — применён к этому расчёту (${ldt.name || 'КСС'}, угол ≈ ${ldt.beam}°)` : r.unmatched.length ? `без артикула в имени: ${r.unmatched.length} — переименуйте файлы по артикулу` : '',
+        hit ? `для ${fx.a} будет использована КСС из библиотеки` : '', r.errors.length ? 'ошибки: ' + r.errors.slice(0, 3).join('; ') : ''].filter(Boolean).join('. ');
+      phStat();
+    } catch (er) { ldt = null; $('#cMsg').textContent = 'Не удалось прочитать: ' + er.message; }
+  };
   $('#cGo').onclick = () => {
     try {
       const [rp, rc, rr] = $('#cRefl').value.split(',').map(Number), m = $('#cSrcMode').value;

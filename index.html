@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Maytoni · Ассистент-комплектатор</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%23111%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%227%22 fill=%22%23b08d57%22/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/app.css?v=202611222011">
+<link rel="stylesheet" href="css/app.css?v=202611222019">
 </head>
 <body>
 <header class="top">
@@ -41,11 +41,11 @@
 </main>
 
 <script src="vendor/xlsx.full.min.js"></script>
-<script src="js/config.js?v=202611222011"></script>
-<script src="js/agent-def.js?v=202611222011"></script>
-<script src="js/engine.js?v=202611222011"></script>
-<script src="js/ui.js?v=202611222011"></script>
-<script type="module" src="js/viz3d.js?v=202611222011"></script>
+<script src="js/config.js?v=202611222019"></script>
+<script src="js/agent-def.js?v=202611222019"></script>
+<script src="js/engine.js?v=202611222019"></script>
+<script src="js/ui.js?v=202611222019"></script>
+<script type="module" src="js/viz3d.js?v=202611222019"></script>
 <script>
 (async function () {
   'use strict';
@@ -366,7 +366,7 @@
   try { const s = JSON.parse(localStorage.getItem(HKEY)); if (s && s.history && s.history.length) { history = s.history; log = s.log || []; } } catch (e) { }
   welcome(); for (const [k, h] of log) add(k, h, false);
   $('#status').textContent = 'загружаю каталог…';
-  await MT.loadCatalog('data/catalog.json'); $('#status').textContent = '';
+  await MT.loadCatalog('data/catalog.json'); MTUI.loadPhotometry(); $('#status').textContent = '';
   if (await claudeReady) {
     try { const c = JSON.parse(localStorage.getItem(CKEY)); if (c && c.cturns) { cturns = c.cturns; if (!log.length) { log = c.log || []; for (const [k, h] of log) add(k, h, false); } } } catch (e) { }
     $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">Ассистент работает через ваш аккаунт Claude: при первом сообщении Claude спросит разрешение.</div>';

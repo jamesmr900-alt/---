@@ -337,6 +337,7 @@
     let calc = null;
     if (f) {
       const prof = MT.fixtureProfile(f); if (surface) prof.mount = 'shallow';
+      const ph = MT.photometryFor(f.a); if (ph) { prof.curve = ph.curve; prof.lor = ph.LOR; }   // КСС производителя, если есть
       const nMin = Math.max(1, Math.round(R.L / 1.5)) * Math.max(1, Math.round(R.W / 1.5));   // шаг встраиваемых ~1–1,5 м
       const pk = MT.pickSource(prof, R, { existing: nMin, minShare: 1 });
       if (pk) {

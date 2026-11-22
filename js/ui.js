@@ -72,13 +72,22 @@
     const fx = p.fixture ? MT.get(p.fixture) : null;
     const prof = fx ? MT.fixtureProfile(fx) : { mount: p.mount || 'deep', cap: (p.cap || 'GU10').toUpperCase(), p: 0 };
     if (p.mount) prof.mount = p.mount; if (p.cap) prof.cap = p.cap.toUpperCase();
-    if (p.ldt) { prof.curve = p.ldt.curve; prof.lor = p.ldt.LOR; }
+    // КСС производителя: из загруженного файла или из библиотеки по артикулу
+    let phot = p.ldt ? Object.assign({ origin: 'загруженный файл' }, p.ldt) : null;
+    if (!phot && fx && MT.photometryFor(fx.a)) phot = Object.assign({ origin: 'библиотека КСС' }, MT.photometryFor(fx.a));
+    const integrated = fx && !MT.features(fx).cap && !p.source && !p.lm;   // светильник со встроенным LED: поток — из файла или каталога
+    if (phot && !integrated) { prof.curve = phot.curve; prof.lor = phot.LOR; }
     let res;
     const src = p.source ? MT.get(p.source) : null;
-    if (src || p.lm) {                                   // источник задан — считаем как есть
+    if (integrated && (phot || fx.lm)) {
+      const F = phot && phot.flux ? phot.flux : fx.lm, curve = phot ? phot.curve : MT.beamCurve(fx.ang || 60);
+      const e = MT.estimate(curve, R, F), n = +p.existing || Math.max(e.N, p.minN || 0);
+      res = { src: { a: 'встроенный LED', lm: Math.round(F), ang: phot ? phot.beam : (fx.ang || 60) }, beam: phot ? phot.beam : (fx.ang || 60), lor: 1, F, Nreq: e.N, n, E: e.En(n), curve, options: null };
+    } else if (src || p.lm) {                                   // источник задан — считаем как есть
       const lm = +p.lm || src.lm, ang = +p.ang || src?.ang || (prof.cap === 'GX53' ? 120 : 38);
-      const beam = p.ldt ? p.ldt.beam : MT.beamFor(prof.mount, ang), lor = +p.lor || prof.lor || MT.lorFor(prof.mount, ang);
-      const curve = p.ldt ? p.ldt.curve : MT.beamCurve(beam), F = lm * lor;
+      const usePh = phot && ang <= 45;   // кривая из файла снята с лампой 38–40°
+      const beam = usePh ? phot.beam : MT.beamFor(prof.mount, ang), lor = +p.lor || (usePh ? phot.LOR : 0) || MT.lorFor(prof.mount, ang);
+      const curve = usePh ? phot.curve : MT.beamCurve(beam), F = lm * lor;
       const e = MT.estimate(curve, R, F); const n = +p.existing || e.N;
       res = { src: { a: src?.a || 'вручную', lm, ang, n: src?.n, p: src?.p }, beam, lor, F, Nreq: e.N, n, E: e.En(n), curve, options: null };
     } else {
@@ -94,6 +103,7 @@
         room: p.room || '', area: +(R.L * R.W).toFixed(2), target: R.E, fixture: fx?.a || null, source: res.src.a, source_name: res.src.n || null,
         source_flux: res.src.lm, source_angle: res.src.ang, fixture_efficiency: res.lor, required_count: res.Nreq, count: res.n, existing: +p.existing || null,
         E_avg_estimate: Math.round(res.E), E_point_avg: Math.round(g.avg), E_min: Math.round(g.min), U0: +g.U0.toFixed(2), meets_norm: ok,
+        photometry: phot ? `${phot.origin}: ${phot.name || fx?.a || ''}`.trim() : 'типовая КСС (по углу)',
         options: res.options ? res.options.map(o => ({ source: o.src.a, flux: o.src.lm, angle: o.src.ang, required: o.Nreq, count: o.n, E: Math.round(o.E), price_source: o.src.p || null })) : undefined,
       } };
   }
@@ -129,7 +139,7 @@
       <div><span class="mute">Количество</span><b>${s.count} шт</b></div>
       <div><span class="mute">Нужно по расчёту</span><b>${s.required_count} шт</b></div>
       <div><span class="mute">Итог</span><b>${s.meets_norm ? '<span class="pill ok">норма выполнена</span>' : '<span class="pill bad">ниже нормы</span>'}</b></div></div>
-      <p class="mute">Источник: ${esc(s.source)} ${s.source_name ? '· ' + esc(s.source_name) : ''} · ${s.source_flux} лм, ${s.source_angle}° · КПД светильника ${s.fixture_efficiency}</p>`;
+      <p class="mute">Источник: ${esc(s.source)} ${s.source_name ? '· ' + esc(s.source_name) : ''} · ${s.source_flux} лм, ${s.source_angle}° · КПД светильника ${s.fixture_efficiency}<br>Кривая силы света: ${/библиотека|файл/.test(s.photometry) ? '<span class="pill ok">' + esc(s.photometry) + '</span>' : esc(s.photometry)}</p>`;
     if (s.options) {
       h += '<table class="t"><tr><th>Источник</th><th class="num">Поток</th><th class="num">Угол</th><th class="num">Нужно</th><th class="num">Ставим</th><th class="num">Eср, лк</th><th class="num">РРЦ ист.</th></tr>';
       for (const o of s.options) h += `<tr${o.source === s.source ? ' style="background:#fbf7ee"' : ''}><td>${esc(o.source)}</td><td class="num">${o.flux}</td><td class="num">${o.angle}°</td><td class="num">${o.required}</td><td class="num">${o.count}</td><td class="num">${o.E}</td><td class="num">${rub(o.price_source)}</td></tr>`;
@@ -184,5 +194,35 @@
   /** Общее состояние страницы инструментов (для плана, отчёта, проекта). */
   const TS = window.TS = window.TS || { calcs: [], zones: null, wizard: null, planner: null, kits: [] };
 
-  window.MTUI = { pdfLines, pdfPageImage, loadPdfJs, TS, img, rowsHTML, warnHTML, saveFile, $, esc, rub, n1, kp, renderKP, roomCalc, drawMap, calcHTML, readKPFile };
+
+  /* ---------- Библиотека КСС: файл сайта data/photometry.json + свои файлы пользователя (в браузере) ---------- */
+  const PKEY = 'maytoni_photometry_v1';
+  let userPhot = {}; try { userPhot = JSON.parse(localStorage.getItem(PKEY)) || {}; } catch (e) { }
+  async function loadPhotometry() {
+    let n = 0; try { const r = await fetch('data/photometry.json'); if (r.ok) n = MT.setPhotometry(await r.json()); } catch (e) { }
+    MT.setPhotometry(userPhot, true); return { site: n, user: Object.keys(userPhot).length };
+  }
+  /** Файлы .ldt/.ies/.zip → в библиотеку по артикулу из имени файла. Возвращает {added:[{file, article}], unmatched:[{file, ph}], errors:[]} */
+  async function importPhotometry(files) {
+    const out = { added: [], unmatched: [], errors: [] }, items = [];
+    for (const f of files) {
+      if (/\.zip$/i.test(f.name)) {
+        if (!window.fflate) await new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'vendor/fflate.umd.js'; s.onload = ok; s.onerror = no; document.head.appendChild(s); });
+        const z = fflate.unzipSync(new Uint8Array(await f.arrayBuffer()));
+        for (const [name, data] of Object.entries(z)) if (/\.(ldt|ies)$/i.test(name)) items.push({ name: name.split('/').pop(), text: new TextDecoder('windows-1251').decode(data) });
+      } else if (/\.(ldt|ies)$/i.test(f.name)) items.push({ name: f.name, text: new TextDecoder('windows-1251').decode(await f.arrayBuffer()) });
+    }
+    const before = Object.keys(MT.photometry).length;
+    for (const it of items) {
+      try { const ph = MT.parsePhotometry(it.text, it.name), a = MT.articleFromName(it.name) || MT.articleFromName(ph.name);
+        if (a) { MT.addPhotometry(a, ph, it.name); userPhot[a.toUpperCase()] = MT.photometry[a.toUpperCase()]; out.added.push({ file: it.name, article: a }); }
+        else out.unmatched.push({ file: it.name, ph }); }
+      catch (e) { out.errors.push(it.name + ': ' + e.message); }
+    }
+    try { localStorage.setItem(PKEY, JSON.stringify(Object.fromEntries(Object.entries(userPhot).map(([k, v]) => [k, Object.assign({}, v, { _curve: undefined })])))); } catch (e) { out.errors.push('не хватило места в браузере для сохранения — файлы действуют до перезагрузки'); }
+    out.total = Object.keys(MT.photometry).length; out.before = before; return out;
+  }
+  function clearUserPhotometry() { userPhot = {}; try { localStorage.removeItem(PKEY); } catch (e) { } return loadPhotometry(); }
+
+  window.MTUI = { loadPhotometry, importPhotometry, clearUserPhotometry, pdfLines, pdfPageImage, loadPdfJs, TS, img, rowsHTML, warnHTML, saveFile, $, esc, rub, n1, kp, renderKP, roomCalc, drawMap, calcHTML, readKPFile };
 })();

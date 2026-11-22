@@ -137,7 +137,60 @@
     const raw = zoneFlux(c, 0, 180);                       // кд·ср в единицах таблицы (кд/клм)
     const LOR = num(22) / 100;                             // строка 23 — LOR, %
     const lorCalc = lampFlux > 0 ? raw / 1000 : NaN;       // если таблица в кд/клм — поток светильника на 1 клм лампы
-    return { name, lamps, lampFlux, LOR: LOR > 0 && LOR <= 1 ? LOR : (lorCalc > 0 && lorCalc <= 1 ? lorCalc : 1), curve: normalize(c), beam: fwhm(c) };
+    const lorF = LOR > 0 && LOR <= 1 ? LOR : (lorCalc > 0 && lorCalc <= 1 ? lorCalc : 1);
+    return { format: 'LDT', name, lamps, lampFlux, LOR: lorF, flux: lampFlux * lorF, watts: lamps.reduce((t, l) => t + Math.abs(l.count) * (l.w || 0), 0), curve: normalize(c), beam: fwhm(c) };
+  }
+
+
+  /** Разбор IES (IESNA LM-63): средняя по горизонтальным углам кривая, поток светильника и ламп. */
+  function parseIES(text) {
+    const lines = text.split(/\r?\n/); let i = 0, name = '';
+    for (; i < lines.length; i++) { const l = lines[i].trim(); const m = l.match(/^\[(LUMINAIRE|LUMCAT|TEST|MANUFAC)\]\s*(.*)$/i); if (m && /LUMINAIRE|LUMCAT/i.test(m[1]) && !name) name = m[2].trim(); if (/^TILT\s*=/i.test(l)) break; }
+    if (i >= lines.length) throw new Error('не найдено TILT=');
+    const tilt = lines[i].split('=')[1].trim().toUpperCase(); i++;
+    let tok = lines.slice(i).join(' ').trim().split(/[\s,]+/).filter(Boolean).map(Number), p = 0;
+    if (tilt === 'INCLUDE') { p++; const n = tok[p++]; p += 2 * n; }
+    const nLamps = tok[p++], lmLamp = tok[p++], mult = tok[p++], nV = tok[p++], nH = tok[p++], ptype = tok[p++]; p += 4; p += 2; const watts = tok[p++];
+    const V = tok.slice(p, p + nV); p += nV; const H = tok.slice(p, p + nH); p += nH;
+    const I = []; for (let h = 0; h < nH; h++) { I.push(tok.slice(p, p + nV).map(v => v * mult)); p += nV; }
+    if (I.length !== nH || I[nH - 1].length !== nV) throw new Error('файл IES обрезан');
+    const mean = V.map((_, j) => I.reduce((t, r) => t + r[j], 0) / nH);
+    const c = new Float64Array(NG), vmax = V[V.length - 1], vmin = V[0];
+    for (let k = 0; k < NG; k++) { const g = k * STEP;
+      if (g < vmin || g > vmax) { c[k] = 0; continue; }
+      let j = 0; while (j < V.length - 2 && V[j + 1] < g) j++;
+      const t = V[j + 1] === V[j] ? 0 : Math.min(1, Math.max(0, (g - V[j]) / (V[j + 1] - V[j]))); c[k] = mean[j] + (mean[j + 1] - mean[j]) * t; }
+    const flux = zoneFlux(c, 0, 180), lampFlux = lmLamp > 0 ? nLamps * lmLamp : flux;
+    return { format: 'IES', name, lampFlux, LOR: lmLamp > 0 ? Math.min(1, flux / lampFlux) : 1, flux, watts, curve: normalize(c), beam: fwhm(c), type: ptype };
+  }
+  function parsePhotometry(text, filename) {
+    const t = String(text || '');
+    if (/\.ies$/i.test(filename || '') || /IESNA|TILT\s*=/i.test(t.slice(0, 4000))) return parseIES(t);
+    return parseLDT(t);
+  }
+
+  /* ---------------- Библиотека КСС по артикулам ---------------- */
+  let PHOT = {};
+  const packCurve = c => { const out = []; for (let g = 0; g <= 180; g++) out.push(+(c[g * 2] * 1000).toFixed(3)); return out; };
+  const unpackCurve = a => { const c = new Float64Array(NG); for (let k = 0; k < NG; k++) { const g = k * STEP, i = Math.floor(g), t = g - i; c[k] = ((a[i] || 0) + ((a[Math.min(180, i + 1)] || 0) - (a[i] || 0)) * t) / 1000; } return normalize(c); };
+  /** Артикул по имени файла: самый длинный артикул каталога, который встречается в имени. */
+  function articleFromName(fn) {
+    const base = String(fn || '').replace(/\.[a-z0-9]+$/i, '').toUpperCase();
+    const norm2 = s => s.replace(/[\s_]+/g, ' ');
+    const b = norm2(base); let best = null;
+    for (const tok of b.split(/[ ,;()]+/)) { const x = get(tok); if (x && (!best || x.a.length > best.a.length)) best = x; }
+    if (best) return best.a;
+    for (const x of CAT) { const a = x.a.toUpperCase(); if (a.length >= 4 && b.includes(a) && (!best || a.length > best.a.length)) best = x; }
+    return best ? best.a : null;
+  }
+  function addPhotometry(article, ph, src) {
+    PHOT[String(article).toUpperCase()] = { c: packCurve(ph.curve), lor: +(+ph.LOR).toFixed(3), flux: Math.round(ph.flux || 0), lamp: Math.round(ph.lampFlux || 0), beam: Math.round(ph.beam), w: ph.watts || null, name: ph.name || '', src: src || '' };
+  }
+  function setPhotometry(obj, merge) { PHOT = merge ? Object.assign(PHOT, obj) : (obj || {}); return Object.keys(PHOT).length; }
+  function photometryFor(a) {
+    const p = PHOT[String(a || '').toUpperCase()]; if (!p) return null;
+    if (!p._curve) p._curve = unpackCurve(p.c);
+    return { curve: p._curve, LOR: p.lor, flux: p.flux, lampFlux: p.lamp, beam: p.beam, watts: p.w, name: p.name, src: p.src };
   }
 
   /** КПД светильника по типу установки и углу источника (оценка). */
@@ -256,7 +309,7 @@
     if (fx.mount === 'deep' || fx.mount === 'shallow') list = list.filter(s => s.ang <= 60);
     if (!opts.dimmable) list = list.filter(s => !s.dim);
     const rows = list.map(s => {
-      const beam = beamFor(fx.mount, s.ang), lor = fx.lor ?? lorFor(fx.mount, s.ang);
+      const beam = beamFor(fx.mount, s.ang), lor = fx.curve && s.ang <= 45 && fx.lor ? fx.lor : lorFor(fx.mount, s.ang);
       const curve = fx.curve && s.ang <= 45 ? fx.curve : beamCurve(beam);
       const F = s.lm * lor, est = estimate(curve, R, F);
       const n = Math.max(est.N, minN);
@@ -531,7 +584,7 @@
     return { zone, R, norm: nr, fixture: fx, profile: pr, cur, v1, alt };
   }
 
-  const MT = { imgOf, detectKind, features, setCatalog, loadCatalog, get, search, kind, cls, inPrice, NORMS, normFor, beamCurve, parseLDT, normalize, zoneFlux, fwhm,
+  const MT = { parseIES, parsePhotometry, articleFromName, addPhotometry, setPhotometry, photometryFor, get photometry() { return PHOT; }, imgOf, detectKind, features, setCatalog, loadCatalog, get, search, kind, cls, inPrice, NORMS, normFor, beamCurve, parseLDT, normalize, zoneFlux, fwhm,
     lorFor, beamFor, utilization, estimate, layout, pointGrid, falseColor, SOURCES, sourceList, pickSource, analogs, priceKP,
     kpToXlsx, kpFromSheet, fixtureProfile, checkZone, parseSpec, analogsBySpec, sheetToLines, get catalog() { return CAT; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = MT; else root.MT = MT;
