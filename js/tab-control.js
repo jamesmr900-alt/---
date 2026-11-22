@@ -27,16 +27,18 @@
       <label style="grid-column:span 2">Как управлять<div class="row">${CTL.map(([k, t]) => `<label style="flex-direction:row;align-items:center;gap:4px;color:var(--ink)"><input type="checkbox" data-ctl="${k}" ${k === 'wall' || k === 'phone' ? 'checked' : ''} style="width:auto">${t}</label>`).join('')}</div></label>
     </div></div>
   <div class="card"><h3>Источники света</h3>
-    <div class="row" style="margin-bottom:8px"><button class="b ghost" id="ctFromKp">Взять из КП / рабочего варианта</button><span class="mute" id="ctMsg">Светильники, ленты и треки группируются по помещениям. Для LED-светильников ток и мощность драйвера берутся из базы конфигуратора.</span></div>
+    <div class="row" style="margin-bottom:8px"><button class="b ghost" id="ctFromKp">Взять из КП / рабочего варианта</button><span class="mute" id="ctMsg">Светильники, ленты и треки группируются по помещениям. Тип питания берётся из таблицы драйверов: CC — драйвер тока; CV 12/24 В — диммер или блок питания DALI/TRIAC, а не драйвер; DOB (драйвер на плате) — диммируется TRIAC, если это указано в характеристиках, иначе только вкл/выкл реле нужного протокола.</span></div>
     <div class="scroll" style="max-height:none"><table class="t" id="ctTab"></table></div>
     <div class="row" style="margin-top:10px"><button class="b" id="ctGo">Подобрать управление</button></div></div>
   <div id="ctOut"></div>`;
-  let sources = [], rooms = [], ev = null, chosen = 0, eqRows = [];
+  let sources = [], rooms = [], ev = null, chosen = 0, eqRows = [], DRV = {};
+  fetch('data/drivers.json?v=' + (window.ASSET_V || '')).then(r => r.ok ? r.json() : {}).then(d => { DRV = d; window.MT_DRIVERS = d; }).catch(() => {});
+  const is48 = c => /магнит|48|низковольт/i.test(c || '') || MT.catalog.some(p => MT.kind(p) === 'блок питания' && String(p.comp || '').split(/;\s*/).includes(c) && /48/.test(p.n || ''));
   const FEAT = [['dim', 'яркость'], ['cct', 'оттенок белого'], ['rgb', 'цвет']];
   function fromRows(rows) {
     const rmap = new Map(), src = new Map();
     for (const r of rows) {
-      const x = MT.get(r.a); if (!x) continue;
+      const x = MT.get(r.a); if (!x || x.g === 'Voltum') continue;
       const k = MT.kind(x), f = MT.features(x), room = r.room || 'Помещение';
       if (MT.cls(x) === 'source' || ['комплектующие', 'аксессуар', 'профиль', 'блок питания', 'контроллер', 'диммер', 'пульт', 'шлюз', 'датчик', 'шинопровод', 'драйвер', 'панель управления', 'реле', 'усилитель', 'конвертер'].includes(k)) continue;
       if (!rmap.has(room)) rmap.set(room, 'r' + (rmap.size + 1));
@@ -49,9 +51,19 @@
           if (m === 'MIX') s.features = ['onoff', 'dim', 'cct']; if (m === 'RGB' || m === 'RGBW') s.features = ['onoff', 'dim', 'rgb'];
           s.wpm = x.w || ''; s.voltage = f.volt ? f.volt.lo : 24; if (E.STRIPS[x.a]) s.stripSku = x.a; s._reel = (x.l || 5000) / 1000;
           const ml = String(r.note || '').match(/([\d.]+)\s*м/); s._len = ml ? +ml[1] : 0;
-        } else if (k === 'трековый' || k === 'трековый подвесной') { s.kind = /магнит|48|низковольт/i.test(x.c || '') ? 'track48' : 'track230'; s.unitPower = x.w || ''; }
+        } else if (k === 'трековый' || k === 'трековый подвесной') { s.kind = is48(x.c) ? 'track48' : 'track230'; s.unitPower = x.w || ''; }
+        else if (DRV[x.a] && DRV[x.a].t !== 'CC') {
+          const d = DRV[x.a];
+          if (d.t === 'AC') {   // DOB: драйвер на плате, заменить нельзя
+            const triac = x.dim === '+' || /triac|диммир/i.test(x.n + ' ' + (x.d || ''));
+            if (triac) { s.kind = 'lamp'; s.phaseDim = 'yes'; s.name += ' · DOB, диммируется TRIAC'; }
+            else { s.kind = 'led_fixed'; s.features = ['onoff']; s.name += ' · DOB — только вкл/выкл через реле'; }
+            s.unitPower = d.w || x.w || '';
+          } else { s.kind = 'lowv'; s.voltage = +d.t.slice(2); s.unitPower = d.w || x.w || ''; s.name += ` · питание CV ${s.voltage} В — диммер/блок питания, не драйвер`; }
+        }
         else if (lum) { s.kind = lum.fixed ? 'led_fixed' : 'led_repl'; s.current = lum.i || ''; s.unitPower = lum.w || ''; s.driversPer = lum.n || 1; s.ledV = lum.v ? [].concat(lum.v).join('-') : ''; s.lumSku = x.a; }
         else if (f.cap) { s.kind = 'lamp'; s.unitPower = 8; s._nl = f.nl || 1; }
+        else if (DRV[x.a]) { const d = DRV[x.a]; s.kind = 'led_repl'; s.current = d.ma || ''; s.unitPower = d.w || x.w || ''; s.driversPer = d.n || 1; s.ledV = d.v ? d.v.join('-') : ''; }
         else { s.kind = 'led_repl'; s.unitPower = x.w || ''; }
         src.set(key, s);
       }

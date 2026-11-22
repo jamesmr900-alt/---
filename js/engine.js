@@ -10,6 +10,8 @@
   /* ---------------- Каталог ---------------- */
   let CAT = [], BY = {};
   function setCatalog(list) { CAT = list; BY = {}; for (const x of list) BY[x.a.toUpperCase()] = x; return CAT.length; }
+  /** Добавить позиции другого каталога (например, ЭУИ Voltum) — для названий в КП; в подбор светильников не попадают. */
+  function addItems(list) { for (const x of list) { const k = x.a.toUpperCase(); if (!BY[k]) BY[k] = x; } }
   async function loadCatalog(url) { const r = await fetch(url || 'data/catalog.json'); return setCatalog(await r.json()); }
   const get = a => BY[String(a || '').trim().toUpperCase()] || null;
   const norm = s => String(s || '').toLowerCase().replace(/ё/g, 'е');
@@ -436,7 +438,7 @@
   function priceKP(rows) {
     let total = 0; const missing = [];
     const lines = rows.map(r => {
-      const x = get(r.a); const p = x && x.p ? x.p : 0; if (!p) missing.push(r.a);
+      const x = get(r.a); const p = x && x.p ? x.p : 0; if (!p && !(x && x.g === 'Voltum')) missing.push(r.a);
       const sum = p * (r.qty || 0); total += sum;
       return Object.assign({}, r, { n: x ? x.n : '— нет в каталоге —', p, sum, st: x ? x.st : null });
     });
@@ -586,7 +588,7 @@
     return { zone, R, norm: nr, fixture: fx, profile: pr, cur, v1, alt };
   }
 
-  const MT = { parseIES, parsePhotometry, articleFromName, addPhotometry, setPhotometry, photometryFor, get photometry() { return PHOT; }, imgOf, detectKind, features, setCatalog, loadCatalog, get, search, kind, cls, inPrice, NORMS, normFor, beamCurve, parseLDT, normalize, zoneFlux, fwhm,
+  const MT = { addItems, parseIES, parsePhotometry, articleFromName, addPhotometry, setPhotometry, photometryFor, get photometry() { return PHOT; }, imgOf, detectKind, features, setCatalog, loadCatalog, get, search, kind, cls, inPrice, NORMS, normFor, beamCurve, parseLDT, normalize, zoneFlux, fwhm,
     lorFor, beamFor, utilization, estimate, layout, pointGrid, falseColor, SOURCES, sourceList, pickSource, analogs, priceKP,
     kpToXlsx, kpFromSheet, fixtureProfile, checkZone, parseSpec, analogsBySpec, sheetToLines, get catalog() { return CAT; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = MT; else root.MT = MT;

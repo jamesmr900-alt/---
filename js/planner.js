@@ -48,7 +48,7 @@
         </div>
         <div class="card" id="pProps" style="margin-bottom:8px"><span class="mute">Выберите объект на плане.</span></div>
         <div class="card"><b>Результат</b>
-          <div class="row" style="margin-top:6px"><button class="b sm" id="p3d">3D-вид</button><button class="b ghost sm" id="pPng">PNG</button><button class="b ghost sm" id="pPdf">Монтажная схема PDF</button></div>
+          <div class="row" style="margin-top:6px"><button class="b sm" id="p3d">3D-вид</button><label class="b ghost sm" style="cursor:pointer" title="Файлы .glb / .obj; имя файла — артикул (TR243-4-12WTW-DSZ-B), начало артикула (TR243) или серия (Focus Led). Модели хранятся в этом браузере.">3D-модели…<input type="file" id="pMdl" accept=".glb,.gltf,.obj" multiple hidden></label><button class="b ghost sm" id="pPng">PNG</button><button class="b ghost sm" id="pPdf">Монтажная схема PDF</button></div>
           <div class="row" style="margin-top:6px"><button class="b ghost sm" id="pToKp">Светильники плана → в КП</button><button class="b ghost sm" id="pClear">очистить план</button></div>
           <div id="pSum" class="mute" style="margin-top:6px"></div></div>
       </div>
@@ -73,11 +73,27 @@
   }
   const kindOf = x => { const k = MT.kind(x); return k === 'встраиваемый' ? 'recessed' : k === 'подвесной' || k === 'трековый подвесной' ? 'pendant' : k === 'настенный' ? 'wall' : k === 'трековый' ? 'track' : k === 'напольный' ? 'floor' : k === 'настольный' ? 'table' : k === 'лента' ? 'strip' : 'surface'; };
 
+  /** Подпись плана: что и сколько стоит. Изменилась — проект и КП пересчитываются по плану. */
+  const planSig = p => JSON.stringify(legendOf(p).filter(l => l.a).map(l => [l.key, l.n, Math.round(l.len * 10)]).sort());
+  let planTimer = null;
+  let v3Timer = null, v3Sig = "", v3 = null;
+  function planChanged(p) {
+    if (!p) return;
+    const box = document.getElementById('p3dBox');
+    if (box && !box.hidden && window.MT3D) { const g = JSON.stringify(p.items.map(i => [i.a, i.kind, i.x, i.y, i.z, i.x1, i.y1, i.x2, i.y2, i.w, i.d, i.rot])) + p.W + p.L;
+      if (g !== v3Sig) { const first = !v3Sig; v3Sig = g; if (!first) { clearTimeout(v3Timer); v3Timer = setTimeout(async () => { const cam = v3 && v3.camera ? { p: v3.camera.position.clone(), t: v3.controls && v3.controls.target.clone() } : null; const sc = scene3d(); try { await MT3D.prepare(sc); } catch (e) { } if (v3) v3.dispose(); v3 = MT3D.render(box, sc); if (cam && v3 && v3.camera) { v3.camera.position.copy(cam.p); if (cam.t && v3.controls) { v3.controls.target.copy(cam.t); v3.controls.update(); } } }, 900); } } }
+    const sg = planSig(p);
+    if (p._sig === undefined) { p._sig = sg; return; }
+    if (sg === p._sig) return;
+    p._sig = sg; clearTimeout(planTimer);
+    planTimer = setTimeout(() => { if (window.PROJECT && PROJECT.fromPlan) PROJECT.fromPlan(p); }, 500);
+  }
   function draw() {
     const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
     if (cv.width !== Math.round(r.width * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, r.width, r.height);
     render(ctx, { ui: true });
+    planChanged(S());
     summary();
   }
   /** Рисует план в контекст (на экране и для экспорта). */
@@ -235,7 +251,7 @@
   $('#pToKp').onclick = () => { const rows = legendOf(S()).filter(l => l.a).map(l => ({ room: S().name, a: l.a, qty: l.key.startsWith('line') ? Math.ceil(l.len) : l.n })); MTUI.kp.add(rows); $('#pToKp').textContent = `Добавлено: ${rows.length} поз.`; };
 
   /* ---------- 3D ---------- */
-  let v3 = null;
+  // v3 объявлен выше
   function scene3d() {
     const p = S(), lums = [], furn = [];
     p.items.forEach(i => {
@@ -248,7 +264,10 @@
     });
     return { title: p.name, room: { width: p.W, length: p.L, height: p.H }, luminaires: lums, furniture: furn };
   }
-  $('#p3d').onclick = () => { if (!window.MT3D) { setHint('3D загружается…'); return; } const b = $('#p3dBox'); b.hidden = false; if (v3) v3.dispose(); v3 = MT3D.render(b, scene3d()); b.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
+  async function open3d(scroll) { if (!window.MT3D) { setHint('3D загружается…'); return; } const b = $('#p3dBox'); b.hidden = false; const sc = scene3d(); try { await MT3D.prepare(sc); } catch (e) { } if (v3) v3.dispose(); v3 = MT3D.render(b, sc); if (scroll) b.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  $('#p3d').onclick = () => open3d(true);
+  $('#pMdl').onchange = async e => { if (!window.MT3D) return; const done = await MT3D.addModels([...e.target.files]); e.target.value = '';
+    setHint(done.length ? `Загружено моделей: ${done.length} (${done.join(', ')}). Они применяются к артикулам, начинающимся так же, или к серии.` : 'Не удалось прочитать модели: нужны .glb, .gltf (со встроенными данными) или .obj.'); if (!$('#p3dBox').hidden) open3d(false); };
 
   /* ---------- Экспорт ---------- */
   function snapshot(scale = 2.5) {
@@ -269,6 +288,23 @@
     if (i < 0) { TS.planner.plans.push(newPlan(name)); i = TS.planner.plans.length - 1; }
     TS.planner.cur = i; const p = S(); p.W = +(+W).toFixed(2); p.L = +(+L).toFixed(2); p.H = H || p.H; p.items = p.items.filter(it => it.t === 'furn'); return p;
   }
+  /** Трасса трека в плане: линия, Г, П, квадрат — стороны по введённым длинам, вписанные в помещение с отступом 0,6 м. */
+  function trackPath(room, p) {
+    const shape = room.trackShape && room.trackShape !== 'нет' ? room.trackShape : 'линия';
+    let sd = String(room.trackSides || room.track || '').split(/[,;\s]+/).map(v => parseFloat(String(v).replace(',', '.'))).filter(v => v > 0);
+    if (!sd.length) sd = [p.L * 0.6];
+    const m = 0.6, maxX = Math.max(0.5, p.W - 2 * m), maxY = Math.max(0.5, p.L - 2 * m), cx = p.W / 2, cy = p.L / 2;
+    const fy = v => Math.min(v, maxY), fx = v => Math.min(v, maxX);
+    let pts;
+    if (shape === 'Г') { const a = fy(sd[0]), b = fx(sd[1] || sd[0]); const x0 = cx - b / 2, y0 = cy - a / 2; pts = [[x0, y0], [x0, y0 + a], [x0 + b, y0 + a]]; }
+    else if (shape === 'П') { const a = fy(sd[0]), b = fx(sd[1] || sd[0]), c = fy(sd[2] || sd[0]); const x0 = cx - b / 2, y0 = cy - Math.max(a, c) / 2; pts = [[x0, y0 + a], [x0, y0], [x0 + b, y0], [x0 + b, y0 + c]]; }
+    else if (shape === 'квадрат') { const a = fy(sd[0]), b = fx(sd[1] || sd[0]); const x0 = cx - b / 2, y0 = cy - a / 2; pts = [[x0, y0], [x0 + b, y0], [x0 + b, y0 + a], [x0, y0 + a], [x0, y0]]; }
+    else { const a = fy(sd[0]); pts = [[cx, cy - a / 2], [cx, cy + a / 2]]; }
+    const segs = []; for (let i = 1; i < pts.length; i++) segs.push([pts[i - 1], pts[i]]);
+    const len = segs.reduce((t, [a, b]) => t + Math.hypot(b[0] - a[0], b[1] - a[1]), 0);
+    const at = d => { for (const [a, b] of segs) { const l = Math.hypot(b[0] - a[0], b[1] - a[1]); if (d <= l) return [a[0] + (b[0] - a[0]) * d / l, a[1] + (b[1] - a[1]) * d / l]; d -= l; } return pts[pts.length - 1]; };
+    return { segs, len, at };
+  }
   window.PLANNER = {
     fromWizard(room, rows) {
       this.syncRoom(room, rows); TS.planner.cur = TS.planner.plans.findIndex(p => p.name === room.name);
@@ -282,10 +318,14 @@
       if (!p) { if (TS.planner.plans.length === 1 && !TS.planner.plans[0].items.length && /^(Гостиная|Помещение)/.test(TS.planner.plans[0].name) && !TS.planner.plans[0].bg) TS.planner.plans = []; p = newPlan(room.name); TS.planner.plans.push(p); }
       const resized = Math.abs(p.W - w) > 0.01 || Math.abs(p.L - l) > 0.01; p.W = w; p.L = l; p.H = +room.H || p.H;
       if (resized) p.items = p.items.filter(i => !i.auto);
-      const want = {};
-      const put = (key, a, kind, qty, extra) => { (want[key] = want[key] || { a, kind, qty: 0, extra }).qty += qty; };
+      const want = {}, manual = {}, manLine = new Set();
+      p.items.forEach(i => { if (i.auto || !i.a) return; if (i.t === 'lum') manual[i.a] = (manual[i.a] || 0) + 1; else if (i.t === 'line') manLine.add(i.a); });
+      const put = (key, a, kind, qty, extra) => {
+        if (kind === 'strip' || kind === 'trackbar') { if (manLine.has(a)) return; }
+        else { const m = Math.min(manual[a] || 0, qty); manual[a] = (manual[a] || 0) - m; qty -= m; if (qty <= 0) return; }
+        (want[key] = want[key] || { a, kind, qty: 0, extra }).qty += qty; };
       for (const r of rows) {
-        const x = MT.get(r.a); if (!x || MT.cls(x) === 'source') continue;
+        const x = MT.get(r.a); if (!x || x.g === 'Voltum' || MT.cls(x) === 'source' || (MT.cls(x) === 'control' && MT.kind(x) !== 'лента')) continue;
         const k = MT.kind(x), g = r.group || '', note = r.note || '';
         if (k === 'шинопровод') { put('Трек: шинопровод', x.a, 'trackbar', 1); continue; }
         if (['блок питания', 'профиль', 'комплектующие', 'аксессуар', 'контроллер', 'пульт', 'диммер'].includes(k)) continue;
@@ -303,7 +343,8 @@
         const ex = p.items.filter(i => i.auto && i.gk === key && i.t !== 'furn');
         const isLine = v.kind === 'strip' || v.kind === 'trackbar';
         if (!isLine && ex.length === v.qty) { ex.forEach(i => { i.a = v.a; i.kind = v.kind; }); continue; }
-        if (isLine && ex.length) { ex.forEach(i => { i.a = v.a; }); continue; }
+        const tp = key.startsWith('Трек') ? trackPath(room, p) : null;
+        if (isLine && ex.length && (key !== 'Трек: шинопровод' || ex.length === tp.segs.length)) { ex.forEach(i => { i.a = v.a; }); continue; }
         p.items = p.items.filter(i => !(i.auto && i.gk === key));
         const A = o => p.items.push(Object.assign({ id: p.seq++, auto: true, gk: key, group: key.replace(/^Трек: .*/, 'Трек') }, o));
         if (key === 'Общий свет') MT.layout(v.qty, p.W, p.L).forEach(([xx, yy]) => A({ t: 'lum', a: v.a, kind: v.kind, x: sn(xx), y: sn(yy) }));
@@ -314,9 +355,10 @@
         }
         else if (key === 'Бра') for (let j = 0; j < v.qty; j++) A({ t: 'lum', a: v.a, kind: 'wall', x: sn(p.W * (j + 1) / (v.qty + 1)), y: 0.05 });
         else if (key === 'Подсветка') { const len = Math.min(+room.strip || p.W - 0.3, p.W - 0.3); A({ t: 'line', kind: 'strip', a: v.a, x1: sn((p.W - len) / 2), y1: 0.15, x2: sn((p.W + len) / 2), y2: 0.15 }); }
-        else if (key === 'Трек: шинопровод') { const len = Math.min(+room.track || p.L * 0.7, p.L - 0.4); A({ t: 'line', kind: 'trackbar', a: v.a, x1: sn(p.W / 2), y1: sn((p.L - len) / 2), x2: sn(p.W / 2), y2: sn((p.L + len) / 2) }); }
-        else if (key === 'Трек') { const len = Math.min(+room.track || p.L * 0.7, p.L - 0.4); for (let j = 0; j < v.qty; j++) A({ t: 'lum', a: v.a, kind: 'track', x: sn(p.W / 2), y: sn((p.L - len) / 2 + len * (j + 0.5) / v.qty) }); }
+        else if (key === 'Трек: шинопровод') tp.segs.forEach(([a, b]) => A({ t: 'line', kind: 'trackbar', a: v.a, x1: sn(a[0]), y1: sn(a[1]), x2: sn(b[0]), y2: sn(b[1]) }));
+        else if (key === 'Трек') for (let j = 0; j < v.qty; j++) { const [xx, yy] = tp.at(tp.len * (j + 0.5) / v.qty); A({ t: 'lum', a: v.a, kind: 'track', x: sn(xx), y: sn(yy) }); }
       }
+      p._sig = planSig(p);
       if (!el.hidden && S() === p) { syncHeader(); fit(); draw(); } else syncHeader();
     },
     fromCalc(calc, title) {

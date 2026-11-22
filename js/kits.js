@@ -188,7 +188,7 @@
     const total = runs.reduce((a, b) => a + b, 0);
     const add = (x, n, note, missMsg) => { if (!n) return; if (x) { const pk = packOf(x); rows.push(row(x, Math.ceil(n / pk), pk > 1 ? `${note}: нужно ${n} шт, в упаковке ${pk}` : note, 'Комплектующие')); } else warn.push(missMsg); };
     add(pick(/коннектор\s+прямой|прямой\s+коннектор|соединитель\s+прямой/i, /питани/i), joins, 'стыки шинопровода', 'Прямой коннектор в системе не найден.');
-    add(pick(/l-образн|угловой\s+коннектор|коннектор\s+угловой/i, /питани/i), +o.L || 0, 'углы', 'L-коннектор в системе не найден.');
+    add(pick(/l-образн|угловой\s+коннектор|коннектор\s+угловой|угол-соединитель|угловой\s+соединитель/i, /питани|внутренн/i), +o.L || 0, 'углы 90°', 'L-коннектор (угол) в системе не найден.');
     add(pick(/[тt]-образн/i, /питани/i), +o.T || 0, 'Т-соединения', 'T-коннектор в системе не найден.');
     add(pick(/[хx]-образн/i, /питани/i), +o.X || 0, 'X-соединения', 'X-коннектор в системе не найден.');
     const feed = pick(/ввод\s+питани|токоподвод|коннектор\s+питани/i, /профил/i); add(feed, 1, 'подключение к сети', 'Ввод питания в системе не найден — проверьте.');
@@ -209,20 +209,45 @@
       if (o.auto.w) { const best = Math.min(...fx.map(x => Math.abs((x.w || 0) - o.auto.w))); fx = fx.filter(x => Math.abs((x.w || 0) - o.auto.w) <= best + 2); }
       const x = pickTier(fx, tier); if (x) { rows.push(row(x, o.auto.count, 'подобран автоматически', 'Светильники')); fixW += (x.w || 0) * o.auto.count; } else warn.push('Трековый светильник с такими параметрами не найден.');
     }
-    // питание низковольтных систем
-    const low = /магнит|низковольт|48/i.test(o.system) || rows.some(r => /48\s*В/i.test(r.n));
+    // питание низковольтных систем: блоки питания, в совместимости которых указана эта система
+    const own = all().filter(x => MT.kind(x) === 'блок питания' && !/аварийн/i.test(nameOf(x)) && String(x.comp || '').split(/;\s*/).includes(o.system));
+    const low = own.length > 0 || /магнит|низковольт/i.test(o.system);
     if (low && fixW > 0) {
-      const sysWord = (o.system.match(/[A-Z]{4,}/) || [''])[0];
-      let ps = all().filter(x => MT.kind(x) === 'блок питания' && /48\s*В|48V/i.test(nameOf(x)) && !/аварийн/i.test(nameOf(x)));
-      const own = ps.filter(x => x.c === o.system || new RegExp(sysWord, 'i').test((x.comp || '') + nameOf(x))); if (own.length) ps = own;
+      let ps = own.length ? own : all().filter(x => MT.kind(x) === 'блок питания' && /48\s*В|48V/i.test(nameOf(x)));
+      const pr = o.protocol; const byP = pr === 'DALI' ? ps.filter(x => /dali|-DD/i.test(x.a + nameOf(x))) : pr === 'Zigbee' ? ps.filter(x => /smart|-DS/i.test(x.a + nameOf(x))) : ps.filter(x => !/dali|smart|-DD|-DS/i.test(x.a + nameOf(x)));
+      if (byP.length) ps = byP;
+      const pc = ps.filter(x => colorOk(x, col)); if (pc.length) ps = pc;
       const need = fixW * 1.2, maxW = Math.max(...ps.map(x => x.w || 0));
-      if (ps.length && maxW > 0) { const n = Math.ceil(need / maxW), fit = ps.filter(x => x.w >= need / n), p = pickTier(fit.filter(x => x.w <= Math.min(...fit.map(v => v.w)) * 1.5), 'бюджет');
-        rows.push(row(p, n, `светильники ${Math.round(fixW)} Вт ×1,2`, 'Питание')); }
+      if (ps.length && maxW > 0) { const n = Math.ceil(need / maxW), fit = ps.filter(x => x.w >= need / n), p = pickTier(fit.filter(x => x.w <= Math.min(...fit.map(v => v.w)) * 1.5), 'бюджет') || pickTier(fit, 'бюджет');
+        rows.push(row(p, n, `светильники ${Math.round(fixW)} Вт ×1,2${n > 1 ? ', ' + n + ' блока' : ''}`, 'Питание')); }
       else warn.push('Блок питания 48 В для системы подберите вручную.');
     }
     if (cut.length) warn.push('Подрезка шинопровода: ' + cut.join('; ') + '.');
     warn.push('Проверьте по каталогу системы: способ крепления к потолку, тип ввода питания и совместимость с выбранными светильниками.');
     return { rows: rows.map(r => Object.assign(r, { room })), warn, info: { total, joins, ends, fixW: Math.round(fixW), low } };
+  }
+
+
+  /** Форма трека → линии и углы. shape: 'линия'|'Г'|'П'|'квадрат'; sides: [a, b, c] м */
+  function trackShape(shape, sides) {
+    const s = (sides || []).map(Number).filter(v => v > 0);
+    if (!s.length) return null;
+    if (shape === 'Г') return { runs: [s[0], s[1] || s[0]], L: 1 };
+    if (shape === 'П') return { runs: [s[0], s[1] || s[0], s[2] || s[0]], L: 2 };
+    if (shape === 'квадрат') { const a = s[0], b = s[1] || s[0]; return { runs: [a, b, a, b], L: 4 }; }
+    return { runs: [s[0]], L: 0 };
+  }
+  /** Светильник выбранной системы: цвет, цветовая температура, протокол управления, уровень цены. */
+  function trackFixture(system, col, cct, protocol, tier, pref = {}) {
+    let fx = systemParts(system).filter(x => MT.kind(x) === 'трековый' && MT.inPrice(x));
+    const c = fx.filter(x => colorOk(x, col)); if (c.length) fx = c;
+    const P = protocol === 'Zigbee' ? /zigbee/i : protocol === 'DALI' ? /dali/i : null;
+    if (P) { const p = fx.filter(x => P.test(nameOf(x))); if (p.length) fx = p; }
+    else { const p = fx.filter(x => !/zigbee|dali|smart/i.test(nameOf(x))); if (p.length) fx = p; }
+    if (cct && !P) { const k = fx.filter(x => MT.features(x).cct === +cct); if (k.length) fx = k; }
+    const withF = fx.filter(x => ledFlux(x) > 0); if (withF.length) fx = withF;
+    if (pref.beamMin) { const b = fx.filter(x => (x.ang || MT.photometryFor(x.a)?.beam || 0) >= pref.beamMin); if (b.length) fx = b; }
+    return pickTier(fx, tier);
   }
 
   /* ================= DALI ================= */
@@ -343,6 +368,46 @@
     if (!(L > 0 && W > 0)) return { rows, notes: ['нет размеров'], calc: null };
     const H = +room.H || 2.75, nr = MT.normFor(name), bath = nr.id === 'bath', col = room.color || glob.color || 'белый', cct = +(glob.cct || 3000);
     const R = { L: Math.max(L, W), W: Math.min(L, W), H, E: nr.E, Ke: 0.8, rp: 0.7, rc: 0.5, rr: 0.2 };
+    const S0 = R.L * R.W; let Eextra = 0; const extraNote = [];
+    // ---- трековая система: форма и стороны, светильники системы — по освещённости ----
+    const shape = room.trackShape && room.trackShape !== 'нет' ? room.trackShape : (+room.track > 0 ? 'линия' : null);
+    if (shape) {
+      const sides = String(room.trackSides || room.track || '').split(/[,;\s]+/).map(v => parseFloat(v.replace(',', '.'))).filter(v => v > 0);
+      const geo = trackShape(shape, sides);
+      if (!geo) notes.push('трек: укажите длины сторон');
+      else {
+        const tm = room.trackMount && room.trackMount !== 'авто' ? room.trackMount : (room.ceiling === 'ГКЛ' ? 'встраиваемый' : room.ceiling === 'натяжной' ? 'натяжной' : 'накладной');
+        const sys = glob.trackSystem || trackSystems().find(x => /EXILITY$/.test(x)) || trackSystems()[0];
+        const tcol = col === 'черный' ? 'черн' : col === 'белый' ? 'бел' : col;
+        const tf = trackFixture(sys, tcol, cct, glob.control, tier);
+        const total = geo.runs.reduce((x, y) => x + y, 0);
+        let fixtures = [], nT = 0;
+        if (tf) {
+          const ph = MT.photometryFor(tf.a), F = ledFlux(tf), curve = ph ? ph.curve : MT.beamCurve(tf.ang || 36);
+          const e = MT.estimate(curve, R, F), nMax = Math.max(1, Math.floor(total / 0.35)), nMinT = Math.max(2, Math.ceil(total / 1.2));
+          nT = Math.min(nMax, Math.max(nMinT, e.N)); Eextra += e.En(nT); fixtures = [{ a: tf.a, qty: nT }];
+          extraNote.push(`трек ${nT} × ${tf.a} ≈ ${Math.round(e.En(nT))} лк`);
+        } else notes.push(`трек: в системе «${sys}» нет светильника цвета «${col}»${glob.control && glob.control !== 'none' ? ' с управлением ' + glob.control : ''}`);
+        const tr = trackCalc({ system: sys, mount: tm, color: tcol, runs: geo.runs, L: geo.L, fixtures, tier, protocol: glob.control, room: name });
+        if (tr.rows) tr.rows.forEach(r => rows.push({ a: r.a, qty: r.qty, note: r.note + (r.group === 'Светильники' ? ' — по освещённости' : ''), group: `Трек (${shape}, ${tm})` })); else notes.push(tr.error);
+        (tr.warn || []).filter(w => !/Проверьте по каталогу|из другой системы/.test(w)).forEach(w => notes.push('трек: ' + w));
+      }
+    }
+    // ---- лента по назначению (учитывается в освещённости: ~30% потока на рабочую плоскость) ----
+    if (+room.strip > 0) {
+      const u = STRIP_USE[room.stripUse] || STRIP_USE['карниз'];
+      const prof = u.profile ? (room.ceiling === 'натяжной' ? 'натяжной' : room.ceiling === 'бетон' ? 'накладной' : 'встраиваемый') : 'none';
+      const lr = lentaCalc({ segments: [{ name: u.label, len: +room.strip }], volt: 24, mode: 'mono', cct: u.cct || cct, wpm: u.wpm, ip: bath || u.ip ? 65 : 20, tier, profile: prof, profileColor: col === 'черный' ? 'черн' : 'серебр', control: glob.control && glob.control !== 'none' ? (glob.control === 'TRIAC' ? 'TRIAC' : glob.control) : 'none', room: name });
+      if (lr.rows) { lr.rows.forEach(r => rows.push({ a: r.a, qty: r.qty, note: r.note, group: 'Подсветка: ' + u.label }));
+        const sx = MT.get(lr.info.strip), lmm = sx && sx.lm ? sx.lm : (sx && sx.w ? sx.w * 90 : 0);
+        if (lmm && ['линия', 'карниз', 'парящий'].includes(room.stripUse || 'карниз')) { const eS = lmm * +room.strip * (u.profile ? 0.45 : 0.3) * 0.8 / S0; Eextra += eS; extraNote.push(`лента ≈ ${Math.round(eS)} лк`); } }
+      else notes.push(lr.error);
+      if (!u.profile) notes.push(`лента (${u.label}): профиль не подбирался — выберите его на вкладке «Комплекты» по месту монтажа`);
+    }
+    const needGeneral = R.E - Eextra;
+    if (Eextra > 0) notes.push(`учтено в освещённости: ${extraNote.join(', ')}` + (needGeneral <= R.E * 0.1 ? ' — этого достаточно, отдельный общий свет не нужен' : ` — общий свет добирает ${Math.round(needGeneral)} лк`));
+    const hasExtra = Eextra > 0;
+    if (hasExtra) R.E = Math.max(needGeneral, 0);
     // ---- общий свет: тип монтажа, безрамочность, модель, LED / сменная лампа ----
     const surface = room.mount === 'накладной' || (room.mount !== 'встраиваемый' && room.ceiling === 'бетон');
     const frameless = !!room.frameless && !surface;
@@ -368,27 +433,28 @@
     }
     if (forced && bath && (MT.features(forced).ip || 20) < 44) notes.push(`${forced.a}: IP${MT.features(forced).ip || 20} во влажном помещении — нужен IP44+`);
     let calc = null;
-    if (f) {
-      const nMin = Math.max(1, Math.round(R.L / 1.5)) * Math.max(1, Math.round(R.W / 1.5));   // шаг ~1–1,5 м
+    if (f && hasExtra && needGeneral <= nr.E * 0.1) { f = null; calc = { E: Math.round(Eextra), n: 0, src: '—', fixture: 'трек / лента', norm: nr.E }; }
+    else if (f) {
+      const nMin = hasExtra ? 1 : Math.max(1, Math.round(R.L / 1.5)) * Math.max(1, Math.round(R.W / 1.5));   // шаг ~1–1,5 м
       const ph = MT.photometryFor(f.a), cap = MT.features(f).cap, tag = mode ? `, ${mode}` : '';
       if (!cap) {   // встроенный LED: поток и кривая — из КСС производителя или каталога
         const F = ledFlux(f), curve = ph ? ph.curve : MT.beamCurve(f.ang || 60);
-        if (F) { const e = MT.estimate(curve, R, F), n = Math.max(e.N, Math.ceil(nMin * 0.7));
+        if (F) { const e = MT.estimate(curve, R, F), n = Math.max(e.N, hasExtra ? 1 : Math.ceil(nMin * 0.7));
           rows.push({ a: f.a, qty: n, note: `общий свет, ${nr.E} лк, встроенный LED ${Math.round(F)} лм${ph ? ' (КСС)' : ''}${tag}`, group: 'Общий свет' });
-          calc = { E: Math.round(e.En(n)), n, src: 'встроенный LED', fixture: f.a, norm: nr.E }; }
+          calc = { E: Math.round(e.En(n) + Eextra), n, src: 'встроенный LED', fixture: f.a, norm: nr.E }; }
         else notes.push(`${f.a}: нет данных о потоке — посчитайте на вкладке «Светорасчёт»`);
       } else {
         const prof = MT.fixtureProfile(f); prof.cap = cap; if (cap === 'GX53') prof.mount = 'gx53'; else if (surface && !forced) prof.mount = 'shallow';
         if (ph) { prof.curve = ph.curve; prof.lor = ph.LOR; }
-        const pk = MT.pickSource(prof, R, { existing: nMin, minShare: 1 });
+        const pk = MT.pickSource(prof, R, { existing: hasExtra ? 0 : nMin, minShare: 1 });
         if (pk) {
           rows.push({ a: f.a, qty: pk.n, note: `общий свет, ${nr.E} лк${tag}`, group: 'Общий свет' });
           rows.push({ a: pk.src.a, qty: pk.n, note: `${pk.src.lm} лм, ${pk.src.ang}°`, group: 'Общий свет' });
-          calc = { E: Math.round(pk.E), n: pk.n, src: pk.src.a, fixture: f.a, norm: nr.E };
+          calc = { E: Math.round(pk.E + Eextra), n: pk.n, src: pk.src.a, fixture: f.a, norm: nr.E };
         } else notes.push(`${f.a}: для цоколя ${cap} нет подходящих ламп в списке — подберите на вкладке «Светорасчёт»`);
       }
-    } else notes.push('не найден светильник общего света по условиям');
-    if (room.ceiling === 'натяжной' && !surface && !(frameless && f && isStretchFL(f))) notes.push('натяжной потолок: под встраиваемые нужны закладные платформы (в ассортименте Maytoni их нет)');
+    } else if (!calc) notes.push('не найден светильник общего света по условиям');
+    if (f && room.ceiling === 'натяжной' && !surface && !(frameless && isStretchFL(f))) notes.push('натяжной потолок: под встраиваемые нужны закладные платформы (в ассортименте Maytoni их нет)');
     // ---- подвесы над столом / островом ----
     for (const [key, label] of [['table', 'над столом'], ['island', 'над островом']]) {
       const len = +room[key]; if (!(len > 0)) continue;
@@ -400,29 +466,13 @@
     if (+room.bra > 0) { const b = decorFor('настенный', room.accentColor || col, tier, { led: tier === 'премиум' });
       if (b) { rows.push({ a: b.a, qty: +room.bra, note: 'бра', group: 'Декоративный свет' }); const fb = MT.features(b);
         if (fb.cap) { const lp = lampFor(fb.cap, cct); if (lp) rows.push({ a: lp.a, qty: +room.bra * (fb.nl || 1), note: 'лампы к бра', group: 'Декоративный свет' }); } } }
-    // ---- лента по назначению ----
-    if (+room.strip > 0) {
-      const u = STRIP_USE[room.stripUse] || STRIP_USE['карниз'];
-      const prof = u.profile ? (room.ceiling === 'натяжной' ? 'натяжной' : room.ceiling === 'бетон' ? 'накладной' : 'встраиваемый') : 'none';
-      const lr = lentaCalc({ segments: [{ name: u.label, len: +room.strip }], volt: 24, mode: 'mono', cct: u.cct || cct, wpm: u.wpm, ip: bath || u.ip ? 65 : 20, tier, profile: prof, profileColor: col === 'черный' ? 'черн' : 'серебр', control: glob.control || 'none', room: name });
-      if (lr.rows) lr.rows.forEach(r => rows.push({ a: r.a, qty: r.qty, note: r.note, group: 'Подсветка: ' + u.label })); else notes.push(lr.error);
-      if (!u.profile) notes.push(`лента (${u.label}): профиль не подбирался — выберите его на вкладке «Комплекты» по месту монтажа`);
-    }
-    // ---- трековая система ----
-    if (+room.track > 0) {
-      const tm = room.trackMount && room.trackMount !== 'авто' ? room.trackMount : (room.ceiling === 'ГКЛ' ? 'встраиваемый' : room.ceiling === 'натяжной' ? 'натяжной' : 'накладной');
-      const sys = glob.trackSystem || trackSystems().find(x => /EXILITY$/.test(x)) || trackSystems()[0];
-      const tr = trackCalc({ system: sys, mount: tm, color: col === 'черный' ? 'черн' : 'бел', runs: [+room.track], auto: { count: Math.max(2, Math.ceil(+room.track / 0.8)), cct, w: 15 }, tier, room: name });
-      if (tr.rows) tr.rows.forEach(r => rows.push({ a: r.a, qty: r.qty, note: r.note, group: 'Трек (' + tm + ')' })); else notes.push(tr.error);
-      (tr.warn || []).filter(w => !/Проверьте по каталогу/.test(w)).forEach(w => notes.push('трек: ' + w));
-    }
     return { rows: rows.map(r => Object.assign(r, { room: name })), notes, calc };
   }
   function wizard(rooms, glob = {}) {
     const out = {};
     for (const t of VARIANTS) {
       const rows = [], notes = [], calcs = [];
-      rooms.forEach(r => { const k = roomKit(r, t, glob); rows.push(...k.rows); k.notes.forEach(n => notes.push(`${r.name}: ${n}`)); if (k.calc) calcs.push(Object.assign({ room: r.name }, k.calc)); });
+      rooms.forEach(r => { const k = roomKit(r, t, glob); k.rows.forEach(x => { if (/ХАБ/i.test(nameOf(MT.get(x.a) || {})) && rows.some(y => y.a === x.a)) return; rows.push(x); }); k.notes.forEach(n => notes.push(`${r.name}: ${n}`)); if (k.calc) calcs.push(Object.assign({ room: r.name }, k.calc)); });
       const pr = MT.priceKP(rows); out[t] = { rows, notes, calcs, total: pr.total };
     }
     return out;
@@ -444,6 +494,6 @@
     return out;
   }
 
-  const KITS = { STRIP_USE, pickTier, lentaCalc, trackSystems, trackCalc, daliCalc, kpRuleCheck, kpCompare, roomKit, wizard, explication, VARIANTS };
+  const KITS = { trackShape, trackFixture, STRIP_USE, pickTier, lentaCalc, trackSystems, trackCalc, daliCalc, kpRuleCheck, kpCompare, roomKit, wizard, explication, VARIANTS };
   if (typeof module !== 'undefined' && module.exports) module.exports = KITS; else root.KITS = KITS;
 })(typeof window !== 'undefined' ? window : globalThis);

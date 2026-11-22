@@ -224,5 +224,7 @@
   }
   function clearUserPhotometry() { userPhot = {}; try { localStorage.removeItem(PKEY); } catch (e) { } return loadPhotometry(); }
 
-  window.MTUI = { loadPhotometry, importPhotometry, clearUserPhotometry, pdfLines, pdfPageImage, loadPdfJs, TS, img, rowsHTML, warnHTML, saveFile, $, esc, rub, n1, kp, renderKP, roomCalc, drawMap, calcHTML, readKPFile };
+  function toast(msg) { let t = document.getElementById('mtToast'); if (!t) { t = document.createElement('div'); t.id = 'mtToast'; t.style.cssText = 'position:fixed;right:16px;bottom:16px;background:#1f2937;color:#fff;padding:10px 14px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.25);transition:opacity .3s'; document.body.appendChild(t); }
+    t.textContent = msg; t.style.opacity = '1'; clearTimeout(t._h); t._h = setTimeout(() => { t.style.opacity = '0'; }, 2600); }
+  window.MTUI = { toast, loadPhotometry, importPhotometry, clearUserPhotometry, pdfLines, pdfPageImage, loadPdfJs, TS, img, rowsHTML, warnHTML, saveFile, $, esc, rub, n1, kp, renderKP, roomCalc, drawMap, calcHTML, readKPFile };
 })();

@@ -7,6 +7,80 @@
    Координаты в метрах от левого верхнего угла плана: x — по ширине, y — по длине. */
 import * as THREE from '../vendor/three.module.min.js';
 import { OrbitControls } from '../vendor/OrbitControls.js';
+import { GLTFLoader } from '../vendor/GLTFLoader.js';
+import { OBJLoader } from '../vendor/OBJLoader.js';
+
+/* ---------- 3D-модели светильников: библиотека сайта (data/models/index.json: {"артикул или серия": "файл.glb"})
+   и модели, загруженные пользователем (хранятся в браузере, IndexedDB). Ключ — артикул, начало артикула или серия. ---------- */
+const MODELS = new Map();            // key (lower) → THREE.Object3D (шаблон)
+const RAW = new Map();               // key → {buf, ext}
+let libIndex = null;
+const idb = () => new Promise((ok, no) => { const r = indexedDB.open('maytoni_models', 1); r.onupgradeneeded = () => r.result.createObjectStore('m'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+async function idbAll() { try { const db = await idb(); return await new Promise(ok => { const out = [], tx = db.transaction('m'), st = tx.objectStore('m'), c = st.openCursor(); c.onsuccess = () => { const k = c.result; if (k) { out.push([k.key, k.value]); k.continue(); } else ok(out); }; c.onerror = () => ok(out); }); } catch (e) { return []; } }
+async function idbPut(k, v) { try { const db = await idb(); await new Promise(ok => { const tx = db.transaction('m', 'readwrite'); tx.objectStore('m').put(v, k); tx.oncomplete = ok; tx.onerror = ok; }); } catch (e) { } }
+async function idbDel(k) { try { const db = await idb(); await new Promise(ok => { const tx = db.transaction('m', 'readwrite'); k ? tx.objectStore('m').delete(k) : tx.objectStore('m').clear(); tx.oncomplete = ok; tx.onerror = ok; }); } catch (e) { } }
+function parseModel(buf, ext) {
+  return new Promise((ok, no) => {
+    if (ext === 'obj') { try { ok(new OBJLoader().parse(new TextDecoder().decode(buf))); } catch (e) { no(e); } return; }
+    new GLTFLoader().parse(buf, '', g => ok(g.scene), no);
+  });
+}
+let userLoaded = false;
+async function loadUser() { if (userLoaded) return; userLoaded = true; for (const [k, v] of await idbAll()) RAW.set(k, v); }
+async function loadIndex() { if (libIndex) return libIndex; try { const r = await fetch('data/models/index.json?v=' + (window.ASSET_V || '')); libIndex = r.ok ? await r.json() : {}; } catch (e) { libIndex = {}; } return libIndex; }
+function keyFor(article, series) {
+  const a = String(article || '').toLowerCase(), se = String(series || '').toLowerCase();
+  const keys = [...new Set([...RAW.keys(), ...Object.keys(libIndex || {}).map(k => k.toLowerCase())])];
+  let best = null;
+  for (const k of keys) if ((a && (a === k || a.startsWith(k + '-') || a.startsWith(k))) || (se && se === k)) if (!best || k.length > best.length) best = k;
+  return best;
+}
+/** Загрузить модели, нужные для сцены (вызвать перед render). */
+export async function prepare(scene) {
+  await loadUser(); await loadIndex();
+  const need = new Set();
+  for (const l of scene.luminaires || []) { const x = l.article && window.MT ? window.MT.get(l.article) : null; const k = keyFor(l.article, x && x.se); if (k) need.add(k); }
+  for (const k of need) {
+    if (MODELS.has(k)) continue;
+    try {
+      let raw = RAW.get(k);
+      if (!raw) { const file = Object.entries(libIndex).find(([kk]) => kk.toLowerCase() === k)[1]; const r = await fetch('data/models/' + file); raw = { buf: await r.arrayBuffer(), ext: /\.obj$/i.test(file) ? 'obj' : 'glb' }; }
+      MODELS.set(k, await parseModel(raw.buf, raw.ext));
+    } catch (e) { console.warn('модель', k, e); MODELS.set(k, null); }
+  }
+}
+/** Добавить модели из файлов (.glb / .gltf с встроенными данными / .obj). Имя файла — артикул, начало артикула или серия. */
+export async function addModels(files) {
+  const done = [];
+  for (const f of files) {
+    const ext = (f.name.match(/\.(\w+)$/) || [])[1]?.toLowerCase(); if (!['glb', 'gltf', 'obj'].includes(ext)) continue;
+    const k = f.name.replace(/\.\w+$/, '').trim().toLowerCase(), buf = await f.arrayBuffer();
+    try { MODELS.set(k, await parseModel(buf, ext === 'obj' ? 'obj' : 'glb')); RAW.set(k, { buf, ext }); await idbPut(k, { buf, ext }); done.push(k); } catch (e) { console.warn(e); }
+  }
+  return done;
+}
+export async function listModels() { await loadUser(); await loadIndex(); return { user: [...RAW.keys()], library: Object.keys(libIndex || {}) }; }
+export async function clearModels() { await idbDel(null); for (const k of RAW.keys()) MODELS.delete(k); RAW.clear(); }
+/** Экземпляр модели, отмасштабированный по габаритам каталога (мм) или по единицам файла. */
+function modelInstance(article, series, dims) {
+  const k = keyFor(article, series), tpl = k ? MODELS.get(k) : null; if (!tpl) return null;
+  const o = tpl.clone(true), bb = new THREE.Box3().setFromObject(o), sz = bb.getSize(new THREE.Vector3());
+  const maxH = Math.max(sz.x, sz.z), want = dims && dims.d ? dims.d : dims && dims.h ? null : null;
+  let sc = want && maxH ? want / maxH : sz.y > 20 || maxH > 20 ? 0.001 : sz.y > 3 || maxH > 3 ? 0.01 : 1;
+  if (!want && dims && dims.h && sz.y) sc = dims.h / sz.y;
+  o.scale.setScalar(sc);
+  const b2 = new THREE.Box3().setFromObject(o), c = b2.getCenter(new THREE.Vector3());
+  const g = new THREE.Group(); o.position.set(-c.x, -b2.max.y, -c.z); g.add(o);   // начало координат — верх по центру
+  g.userData.height = b2.max.y - b2.min.y;
+  o.traverse(m => { if (m.isMesh) { m.castShadow = false; if (m.material && !m.material.isMeshStandardMaterial) m.material = new THREE.MeshStandardMaterial({ color: m.material.color || 0xdddddd, roughness: 0.5, metalness: 0.3 }); } });
+  return g;
+}
+/** Габариты из каталога, м: d — диаметр/длина, w — ширина, h — высота. */
+function dimsOf(article) {
+  const x = article && window.MT ? window.MT.get(article) : null; if (!x) return null;
+  const d = (x.dm || x.l || 0) / 1000, w = (x.wd || x.dm || x.l || 0) / 1000, h = (x.h || 0) / 1000;
+  return d || h ? { d: d || null, w: w || d || null, h: h || null, square: !x.dm && x.l && x.wd } : null;
+}
 
 const COLORS = { white: '#f4f4f2', 'белый': '#f4f4f2', black: '#1d1d1f', 'черный': '#1d1d1f', 'чёрный': '#1d1d1f', gold: '#c8a25a', 'золото': '#c8a25a',
   brass: '#b5904f', 'латунь': '#b5904f', chrome: '#c9ccd1', 'хром': '#c9ccd1', grey: '#8a8a8f', 'серый': '#8a8a8f' };
@@ -120,11 +194,24 @@ export function render(el, scene) {
     (gMats[grp] = gMats[grp] || []).push(emis); if (!gCct[grp]) gCct[grp] = +l.cct || 3000;
     const items = []; let light = null;
     const add = m => { s.add(m); items.push(m); return m; };
+    const dm = dimsOf(l.article), xs = l.article && window.MT ? window.MT.get(l.article) : null, mdl = modelInstance(l.article, xs && xs.se, dm);
+    if (dm && !l.size) l.size = Math.min(1.5, Math.max(0.04, dm.d || dm.w || 0)) || undefined;
+    if (mdl) {   // реальная 3D-модель изделия
+      let zc = H; if (l.kind === 'wall') zc = (l.z ?? 1.8) + mdl.userData.height / 2; else if (l.kind === 'floor') zc = mdl.userData.height; else if (l.kind === 'table') zc = 0.75 + mdl.userData.height;
+      else if (l.kind === 'pendant') { const hz = l.z ?? Math.max(H - 0.9, 1.6); if (mdl.userData.height < H - hz - 0.05) { zc = hz + mdl.userData.height; const cord = add(new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, H - zc), mat('#222'))); cord.position.set(x, (H + zc) / 2, z); } }
+      mdl.position.set(x, zc, z); if (l.kind === 'wall') mdl.rotation.y = l.y < L / 2 ? 0 : Math.PI; add(mdl);
+      const bot = zc - mdl.userData.height;
+      if (l.kind === 'pendant' || l.kind === 'wall' || l.kind === 'floor' || l.kind === 'table') { light = new THREE.PointLight(lc, lm / (4 * Math.PI), 0, 2); light.position.set(x, bot + mdl.userData.height * 0.3, z); }
+      else { const lens = add(new THREE.Mesh(new THREE.CircleGeometry(Math.max(0.012, (dm && dm.d || 0.06) * 0.3), 20), emis)); lens.rotation.x = Math.PI / 2; lens.position.set(x, bot - 0.002, z);
+        const half = beam / 2 * Math.PI / 180, cd = lm / (2 * Math.PI * (1 - Math.cos(half)));
+        light = new THREE.SpotLight(lc, cd, 0, Math.min(Math.PI / 2.05, half * 1.6), 0.6, 2); light.position.set(x, bot - 0.01, z); light.target.position.set(x, 0, z); s.add(light.target); }
+    } else
     if (l.kind === 'pendant') {
       const zc = l.z ?? Math.max(H - 0.9, 1.6), sz = l.size || 0.3;
       const cord = add(new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, H - zc), mat('#222'))); cord.position.set(x, (H + zc) / 2, z);
       const round = /шар|sphere|ball|globe/i.test(l.name || l.shape || '');
-      const shade = add(new THREE.Mesh(round ? new THREE.SphereGeometry(sz / 2, 24, 16) : new THREE.ConeGeometry(sz / 2, sz * 0.6, 32, 1, true), round ? emis : mat(body, { side: THREE.DoubleSide, metalness: 0.4, roughness: 0.4 })));
+      const sh = dm && dm.h ? Math.min(dm.h, 1.2) : sz * 0.6;
+      const shade = add(new THREE.Mesh(round ? new THREE.SphereGeometry(sz / 2, 24, 16) : dm && dm.square ? new THREE.BoxGeometry(dm.d, Math.min(sh, 0.15), dm.w) : new THREE.ConeGeometry(sz / 2, sh, 32, 1, true), round ? emis : mat(body, { side: THREE.DoubleSide, metalness: 0.4, roughness: 0.4 })));
       shade.position.set(x, zc, z);
       if (!round) { const bulb = add(new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), emis)); bulb.position.set(x, zc - sz * 0.15, z); }
       light = new THREE.PointLight(lc, lm / (4 * Math.PI), 0, 2); light.position.set(x, zc - 0.1, z);
@@ -143,9 +230,12 @@ export function render(el, scene) {
       light = new THREE.PointLight(lc, lm / (4 * Math.PI), 0, 2); light.position.set(x, hh, z);
     } else {   // recessed, surface, track
       const surf = l.kind === 'surface' || l.kind === 'track', sz = l.size || (surf ? 0.08 : 0.09);
-      if (surf) { const c = add(new THREE.Mesh(new THREE.CylinderGeometry(sz / 2, sz / 2, 0.14, 24), mat(body, { metalness: 0.3, roughness: 0.5 }))); c.position.set(x, H - 0.07, z); }
-      else { const ring = add(new THREE.Mesh(new THREE.CylinderGeometry(sz / 2, sz / 2, 0.006, 28), mat(body))); ring.position.set(x, H - 0.003, z); }
-      const lens = add(new THREE.Mesh(new THREE.CircleGeometry(sz * 0.3, 20), emis)); lens.rotation.x = Math.PI / 2; lens.position.set(x, H - (surf ? 0.141 : 0.007), z);
+      const hh = surf ? Math.min(0.4, dm && dm.h ? dm.h : 0.14) : 0.006, sq = dm && dm.square;
+      if (l.kind === 'track') { const ad = add(new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.04, 0.03), mat(body))); ad.position.set(x, H - 0.055, z);
+        const c = add(new THREE.Mesh(new THREE.CylinderGeometry(sz / 2, sz / 2, hh, 24), mat(body, { metalness: 0.3, roughness: 0.5 }))); c.rotation.x = 0.35; c.position.set(x, H - 0.075 - hh / 2, z); }
+      else if (sq) { const c = add(new THREE.Mesh(new THREE.BoxGeometry(dm.d, hh, dm.w), mat(body, { metalness: 0.3, roughness: 0.5 }))); c.position.set(x, H - hh / 2, z); }
+      else { const c = add(new THREE.Mesh(new THREE.CylinderGeometry(sz / 2, sz / 2, hh, 28), mat(body, surf ? { metalness: 0.3, roughness: 0.5 } : {}))); c.position.set(x, H - hh / 2, z); }
+      const lens = add(new THREE.Mesh(new THREE.CircleGeometry(sz * 0.3, 20), emis)); lens.rotation.x = Math.PI / 2; lens.position.set(x, H - hh - (l.kind === 'track' ? 0.075 : 0) - 0.001, z);
       const half = beam / 2 * Math.PI / 180, cd = lm / (2 * Math.PI * (1 - Math.cos(half)));
       light = new THREE.SpotLight(lc, cd, 0, Math.min(Math.PI / 2.05, half * 1.6), 0.6, 2); light.position.set(x, H - 0.02, z);
       light.target.position.set(x + (l.aim ? l.aim[0] : 0), 0, z + (l.aim ? l.aim[1] : 0)); s.add(light.target);
@@ -181,7 +271,7 @@ export function render(el, scene) {
   wrap.appendChild(ui);
   ui.querySelector('[data-t]').onclick = () => { const hid = ui.dataset.min === '1'; ui.dataset.min = hid ? '0' : '1'; [...ui.children].slice(1).forEach(c => c.style.display = hid ? '' : 'none'); ui.querySelector("[data-t] span").textContent = hid ? "▾" : "▸"; };
   const note = document.createElement('div'); note.style.cssText = 'position:absolute;right:8px;bottom:6px;font:11px system-ui;color:#ddd';
-  note.textContent = 'Визуализация иллюстративная; точный вид изделий — по фото в каталоге'; wrap.appendChild(note);
+  note.textContent = MODELS.size ? 'Изделия с загруженными 3D-моделями показаны моделями, остальные — по габаритам каталога' : 'Изделия показаны по габаритам каталога; 3D-модели можно загрузить на вкладке «План и 3D»'; wrap.appendChild(note);
   ui.querySelectorAll('[data-g]').forEach(cb => cb.onchange = () => { gState[cb.dataset.g].on = cb.checked; applyGroup(cb.dataset.g); });
   ui.querySelectorAll('[data-b]').forEach(r => r.oninput = () => { gState[r.dataset.b].b = +r.value; gState[r.dataset.b].on = +r.value > 0; applyGroup(r.dataset.b); });
   ui.querySelectorAll('[data-k]').forEach(r => r.oninput = () => { gState[r.dataset.k].k = +r.value; applyGroup(r.dataset.k); });
@@ -202,7 +292,7 @@ export function render(el, scene) {
   const size = () => { const w = wrap.clientWidth, h = wrap.clientHeight; if (!w || !h) return; renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); };
   const ro = new ResizeObserver(size); ro.observe(wrap); size();
   (function loop() { if (!alive) return; ctl.update(); renderer.render(s, cam); requestAnimationFrame(loop); })();
-  return { lights: lightCount, luminaires: lums.length, dispose() { alive = false; ro.disconnect(); renderer.dispose(); } };
+  return { camera: cam, controls: ctl, lights: lightCount, luminaires: lums.length, dispose() { alive = false; ro.disconnect(); renderer.dispose(); } };
 }
 
 /** Сцена из результата светорасчёта (MTUI.roomCalc). */
@@ -218,5 +308,5 @@ export function sceneFromCalc(calc, extra = {}) {
   }, extra);
 }
 
-window.MT3D = { render, sceneFromCalc, expand };
+window.MT3D = { render, sceneFromCalc, expand, prepare, addModels, listModels, clearModels };
 window.dispatchEvent(new Event('mt3d-ready'));
