@@ -296,7 +296,7 @@
     if ((m = t.match(/(одно|двух|тр[её]х|четыр[её]х|пяти|шести)канальн/i))) f.ch = { 'одно': 1, 'двух': 2, 'трех': 3, 'трёх': 3, 'четырех': 4, 'четырёх': 4, 'пяти': 5, 'шести': 6 }[m[1].toLowerCase()];
     else if ((m = t.match(/(\d)\s*-?\s*канал/i))) f.ch = +m[1];
     const vs = String(x.v || '') + ' ' + t;
-    if ((m = vs.match(/(?<![\d,.])(\d{1,3})\s*(?:-\s*(\d{2,3})\s*)?(?:В|V)(?![а-яёa-z])/i))) { const lo = +m[1], hi = +(m[2] || m[1]); const n0 = v => v >= 200 ? 230 : v; f.volt = { lo: n0(lo), hi: n0(hi) }; }
+    if ((m = vs.match(/(?<![\d,.A-Za-zА-Яа-яЁё])(\d{1,3})\s*(?:-\s*(\d{2,3})\s*)?(?:В|V)(?![а-яёА-ЯЁa-zA-Z])/))) { const lo = +m[1], hi = +(m[2] || m[1]); const n0 = v => v >= 200 ? 230 : v; f.volt = { lo: n0(lo), hi: n0(hi) }; }
     f.col = colorOf(x.col)[0] || colorOf(x.n)[0] || colorOf(extra)[0] || null;
     f.ip = parseInt(String(x.ip || (t.match(/IP\s?(\d{2})/i) || [])[1] || '').replace(/\D/g, '')) || null;
     f.out = x.g === 'Outdoor' || /уличн|ландшафт|фасад/i.test(t);
@@ -314,9 +314,10 @@
     if (!kindOk) return null;
     if (SURF.includes(B.kind) && C.kind !== B.kind) why.push('в каталоге — ' + C.kind);
     if (B.kind !== C.kind && !SURF.includes(B.kind)) { soft.push(C.kind === 'модуль' ? 'модуль вместо лампы — только для встраиваемых светильников' : 'лампа вместо модуля'); pen += 5; }
-    if (B.proto.size) {
-      const miss = [...B.proto].filter(p => !C.proto.has(p));
-      if (miss.length) { hard.push(`управление: ${C.proto.size ? [...C.proto].join(', ') : 'не указано'} вместо ${[...B.proto].join(', ')}`); pen += 40; } else why.push('тот же протокол ' + [...B.proto].join(', '));
+    const KEYP = [...B.proto].filter(p => !['PWM', 'Push', 'ИК'].includes(p));   // ШИМ, кнопка, ИК — не протокол управления
+    if (KEYP.length) {
+      const miss = KEYP.filter(p => !C.proto.has(p));
+      if (miss.length) { hard.push(`управление: ${C.proto.size ? [...C.proto].join(', ') : 'не указано'} вместо ${KEYP.join(', ')}`); pen += 40; } else why.push('управление ' + KEYP.join(', '));
     }
     if (B.mode) { if (C.mode !== B.mode) { hard.push(`цвет свечения: ${C.mode || 'не указан'} вместо ${B.mode}`); pen += 35; } else why.push(B.mode); }
     if (B.cct && !(C.cct == null && C.cap)) {
@@ -459,7 +460,7 @@
     }
     if ((m = t.match(/(?:H|высот\w*)\s*=?\s*(\d{2,4})/i))) sp.h = +m[1];
     if ((m = t.match(/(\d+)\s*[*×x]\s*(E14|E27|G9|GU10|GX53|G4)/i))) { sp.nl = +m[1]; sp.cap = m[2].toUpperCase(); }
-    if ((m = t.match(/(?<![\w,.])(\d{2,3})\s*(?:В|V)(?![а-яёa-z])/i))) sp.v = (+m[1] <= 48 ? 'DC ' : 'AC ') + m[1] + ' В';
+    if ((m = t.match(/(?<![\d,.A-Za-zА-Яа-яЁё])(\d{1,3})\s*(?:-\s*(\d{2,3})\s*)?(?:В|V)(?![а-яёА-ЯЁa-zA-Z])/))) sp.v = (+(m[2] || m[1]) <= 48 ? 'DC ' : 'AC ') + m[1] + (m[2] ? '–' + m[2] : '') + ' В';
     if ((m = t.match(/(?<![\w-])(\d+(?:[.,]\d+)?)\s*шт/i))) sp.qty = fnum(m[1]);
     if (/квадрат|square|\bsq\b/i.test(t)) sp.shape = 'квадрат'; else if (/кругл|round|\brd\b/i.test(t)) sp.shape = 'круг';
     if (/dali|dt8|dt6|0-10|triac|zigbee|wi-?fi|\brf\b|knx|pwm/i.test(t)) sp.proto = (t.match(/dali|dt8|dt6|0-10|triac|zigbee|wi-?fi|\brf\b|knx|pwm/ig) || []).join(' ');
@@ -472,7 +473,7 @@
     if (sp.article) { const r = analogs(sp.article, limit); r.spec = sp; r.byArticle = true; return r; }
     const t = sp.text || '';
     const base = { a: '(описание)', n: t, g: /уличн|outdoor|фасад|ландшафт/i.test(t) ? 'Outdoor' : 'Technical', col: sp.col, cap: sp.cap, w: sp.w ?? sp.wpm, lm: sp.lm, ang: sp.ang,
-      ip: sp.ip, dm: sp.dm, l: sp.l, h: sp.h, wd: sp.wd, v: sp.v, nl: sp.nl };
+      ip: sp.ip, dm: sp.dm, l: sp.l, h: sp.h, wd: sp.wd, nl: sp.nl };
     const F = features(base); F.kind = sp.kind || ''; F.shape = sp.shape; if (sp.dm || sp.l) F.d = sp.dm || sp.l;
     base.__f = F;
     const r = analogs(base, limit); r.spec = sp; return r;
