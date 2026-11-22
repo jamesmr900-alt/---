@@ -11,24 +11,24 @@
       <label class="b ghost" style="display:inline-flex;flex-direction:row;cursor:pointer;color:var(--ink)">📎 Экспликация (PDF / Excel)<input type="file" id="wFile" accept=".pdf,.xlsx,.xls,.csv" hidden></label>
       <span class="mute" id="wMsg">Размеры — длина и ширина или площадь. Норма освещённости берётся по названию помещения.</span>
     </div>
-    <div class="scroll" style="max-height:none"><table class="t" id="wTab"></table></div>
+    <div class="scroll" style="max-height:none"><table class="t" id="wTab"></table></div><datalist id="wModels"></datalist>
     <div class="grid g4" style="margin-top:12px">
       <label>Цветовая температура<select id="wCct"><option>2700</option><option selected>3000</option><option>4000</option></select></label>
       <label>Цвет подвесов и бра<select id="wAcc"><option value="">как корпус</option><option>латунь</option><option>золото</option><option>черный</option><option>белый</option></select></label>
       <label>Управление подсветкой<select id="wCtl"><option value="none">без управления</option><option>RF</option><option>Wi-Fi</option><option>Zigbee</option><option>DALI</option></select></label>
       <label>&nbsp;<button class="b" id="wGo">Подобрать 3 варианта</button></label>
     </div>
-    <p class="mute" style="margin-top:8px">Правила: ГКЛ — встраиваемые, натяжной — встраиваемые на закладных, бетон — накладные; шаг ~1,5 м, количество — по норме СП 52; в утопленные — лампы 38–40° или модули до 60°; во влажные помещения — IP44+. Подвесы над столом — по одному на ~60 см.</p>
+    <p class="mute" style="margin-top:8px">Тип общего света: «авто» — по потолку (ГКЛ и натяжной — встраиваемые, бетон — накладные), или задайте сами. Модель: впишите артикул, и он будет во всех трёх вариантах; пусто — подбирается по уровню цены. Любую позицию в результате можно заменить кнопкой «заменить». Правила: шаг ~1,5 м, количество — по норме СП 52; в утопленные — лампы 38–40° или модули до 60°; во влажные помещения — IP44+. Подвесы над столом — по одному на ~60 см.</p>
   </div>
   <div id="wOut"></div>`;
-  const ROOM = () => ({ name: '', L: '', W: '', S: '', H: 2.75, ceiling: 'ГКЛ', color: 'белый', table: '', island: '', strip: '', bra: '' });
+  const ROOM = () => ({ name: '', L: '', W: '', S: '', H: 2.75, ceiling: 'ГКЛ', mount: 'авто', model: '', color: 'белый', table: '', island: '', strip: '', bra: '' });
   let rooms = [Object.assign(ROOM(), { name: 'Гостиная', L: 5.2, W: 4.5, strip: 6 }), Object.assign(ROOM(), { name: 'Кухня-столовая', S: 16, table: 1.8 }), Object.assign(ROOM(), { name: 'Спальня', L: 4, W: 3.5, bra: 2 })];
   let res = null, cur = 'средний';
   const sel = (k, i, v, opts) => `<select data-r="${i}" data-k="${k}">${opts.map(o => `<option${o === v ? ' selected' : ''}>${o}</option>`).join('')}</select>`;
   function draw() {
-    let h = '<tr><th>Помещение</th><th>Длина, м</th><th>Ширина, м</th><th>или S, м²</th><th>H, м</th><th>Потолок</th><th>Корпуса</th><th>Стол, м</th><th>Остров, м</th><th>Лента, м</th><th>Бра, шт</th><th></th></tr>';
+    let h = '<tr><th>Помещение</th><th>Длина, м</th><th>Ширина, м</th><th>или S, м²</th><th>H, м</th><th>Потолок</th><th>Тип общего света</th><th>Модель (артикул)</th><th>Корпуса</th><th>Стол, м</th><th>Остров, м</th><th>Лента, м</th><th>Бра, шт</th><th></th></tr>';
     rooms.forEach((r, i) => { const inp = (k, w) => `<td><input data-r="${i}" data-k="${k}" value="${esc(r[k])}" style="width:${w}px"></td>`;
-      h += `<tr>${inp('name', 150)}${inp('L', 56)}${inp('W', 56)}${inp('S', 56)}${inp('H', 50)}<td>${sel('ceiling', i, r.ceiling, ['ГКЛ', 'натяжной', 'бетон'])}</td><td>${sel('color', i, r.color, ['белый', 'черный', 'серый'])}</td>${inp('table', 50)}${inp('island', 50)}${inp('strip', 50)}${inp('bra', 44)}<td><button class="b ghost sm" data-del="${i}">✕</button></td></tr>`; });
+      h += `<tr>${inp('name', 150)}${inp('L', 56)}${inp('W', 56)}${inp('S', 56)}${inp('H', 50)}<td>${sel('ceiling', i, r.ceiling, ['ГКЛ', 'натяжной', 'бетон'])}</td><td>${sel('mount', i, r.mount, ['авто', 'встраиваемый', 'накладной'])}</td><td><input data-r="${i}" data-k="model" value="${esc(r.model)}" placeholder="подобрать" list="wModels" style="width:130px"></td><td>${sel('color', i, r.color, ['белый', 'черный', 'серый'])}</td>${inp('table', 50)}${inp('island', 50)}${inp('strip', 50)}${inp('bra', 44)}<td><button class="b ghost sm" data-del="${i}">✕</button></td></tr>`; });
     $('#wTab').innerHTML = h;
     $('#wTab').querySelectorAll('[data-r]').forEach(x => x.onchange = () => { rooms[+x.dataset.r][x.dataset.k] = x.value; });
     $('#wTab').querySelectorAll('[data-del]').forEach(b => b.onclick = () => { rooms.splice(+b.dataset.del, 1); draw(); });
@@ -48,7 +48,7 @@
   };
   const num = v => parseFloat(String(v).replace(',', '.')) || 0;
   $('#wGo').onclick = () => {
-    const rr = rooms.filter(r => r.name).map(r => ({ name: r.name, L: num(r.L), W: num(r.W), S: num(r.S), H: num(r.H) || 2.75, ceiling: r.ceiling, color: r.color, table: num(r.table), island: num(r.island), strip: num(r.strip), bra: num(r.bra), accentColor: $('#wAcc').value || null }));
+    const rr = rooms.filter(r => r.name).map(r => ({ name: r.name, L: num(r.L), W: num(r.W), S: num(r.S), H: num(r.H) || 2.75, ceiling: r.ceiling, mount: r.mount, model: (r.model || '').trim(), color: r.color, table: num(r.table), island: num(r.island), strip: num(r.strip), bra: num(r.bra), accentColor: $('#wAcc').value || null }));
     if (!rr.length) { $('#wOut').innerHTML = '<div class="card mute">Добавьте помещения.</div>'; return; }
     res = KITS.wizard(rr, { cct: +$('#wCct').value, control: $('#wCtl').value });
     MTUI.TS.wizard = { rooms: rr, res };
@@ -61,7 +61,7 @@
     h += `<div class="row" style="margin:12px 0"><button class="b" id="wToKp">Вариант «${cur}» → в КП</button><button class="b ghost" id="wXlsx">Все три варианта в xlsx</button><span class="mute">Можно отредактировать в КП и проверить на вкладке «Проверка КП».</span></div>`;
     if (v.calcs.length) h += '<table class="t" style="margin-bottom:10px"><tr><th>Помещение</th><th>Общий свет</th><th class="num">Шт</th><th>Источник</th><th class="num">Норма</th><th class="num">Получится</th><th></th></tr>' +
       v.calcs.map(c => `<tr><td>${esc(c.room)}</td><td>${esc(c.fixture)}</td><td class="num">${c.n}</td><td>${esc(c.src)}</td><td class="num">${c.norm} лк</td><td class="num">${c.E >= c.norm * 0.98 ? '<span class="pill ok">' : '<span class="pill bad">'}${c.E} лк</span></td><td><button class="b ghost sm" data-plan="${esc(c.room)}">в план и 3D</button></td></tr>`).join('') + '</table>';
-    h += MTUI.rowsHTML(v.rows, { room: true, group: true }) + MTUI.warnHTML(v.notes) + '</div>';
+    h += MTUI.rowsHTML(v.rows, { room: true, group: true, actions: true }) + MTUI.warnHTML(v.notes) + '</div>';
     $('#wOut').innerHTML = h;
     $('#wOut').querySelectorAll('[data-v]').forEach(d => d.onclick = () => { cur = d.dataset.v; render(); });
     $('#wToKp').onclick = () => { MTUI.kp.set(v.rows.map(r => ({ room: r.room, a: r.a, qty: r.qty })), `КП — ${cur} вариант`); $('#wToKp').textContent = 'Готово ✓ — открыта вкладка КП'; setTimeout(() => window.showTab && window.showTab('kp'), 400); };
@@ -71,11 +71,24 @@
       const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       if (!(await MTUI.saveFile('Варианты подбора.xlsx', new Blob([buf])))) XLSX.writeFile(wb, 'Варианты подбора.xlsx');
     };
+    $('#wOut').querySelectorAll('[data-rep]').forEach(b => b.onclick = () => {
+      const i = +b.dataset.rep, r = v.rows[i], tr = b.closest('tr'); const old = $('#wOut').querySelector('.rep-row'); if (old) old.remove();
+      const an = MT.analogs(r.a, 12).list;
+      const row = document.createElement('tr'); row.className = 'rep-row';
+      row.innerHTML = `<td colspan="10" style="background:#fbf7ee"><b>Заменить ${esc(r.a)}</b> на: <select id="wRepSel" style="max-width:560px">${an.map(o => `<option value="${esc(o.item.a)}">${o.exact ? '✓' : o.hard.length ? '≈' : '~'} ${esc(o.item.a)} · ${esc((o.item.n || '').slice(0, 60))} · ${rub(o.item.p)}${o.hard.length ? ' — ' + esc(o.hard[0]) : ''}</option>`).join('')}</select>
+        или артикул <input id="wRepArt" style="width:150px"> <button class="b sm" id="wRepOk">Заменить</button> <button class="b ghost sm" id="wRepNo">отмена</button>
+        <div class="mute" style="margin-top:4px">Количество сохранится. Если меняете светильник на модель с другим цоколем или встроенным LED — пересчитайте вариант (кнопка «Подобрать») с этим артикулом в колонке «Модель».</div></td>`;
+      tr.after(row);
+      $('#wRepNo').onclick = () => row.remove();
+      $('#wRepOk').onclick = () => { const a = ($('#wRepArt').value.trim() || $('#wRepSel').value); const x = MT.get(a); if (!x) { $('#wRepArt').style.outline = '2px solid var(--bad)'; return; }
+        r.a = x.a; r.note = (r.note ? r.note + '; ' : '') + 'заменено вручную'; v.total = MT.priceKP(v.rows).total; render(); };
+    });
     $('#wOut').querySelectorAll('[data-plan]').forEach(b => b.onclick = () => {
       const room = MTUI.TS.wizard.rooms.find(r => r.name === b.dataset.plan);
       if (window.PLANNER) { window.PLANNER.fromWizard(room, v.rows.filter(r => r.room === room.name)); window.showTab && window.showTab('plan'); }
     });
   }
+  $('#wModels').innerHTML = MT.catalog.filter(x => MT.inPrice(x) && ['встраиваемый', 'накладной', 'потолочный', 'трековый'].includes(MT.kind(x)) && x.g === 'Technical').slice(0, 1500).map(x => `<option value="${esc(x.a)}">${esc((x.n || '').slice(0, 70))}</option>`).join('');
   window.WIZ = { setRooms(r) { rooms = (r || []).map(x => Object.assign(ROOM(), x)); draw(); } };
   draw();
 })();

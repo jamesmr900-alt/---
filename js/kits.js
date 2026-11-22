@@ -328,25 +328,40 @@
     if (!(L > 0 && W > 0)) return { rows, notes: ['нет размеров'], calc: null };
     const H = +room.H || 2.75, nr = MT.normFor(name), bath = nr.id === 'bath', col = room.color || glob.color || 'белый', cct = +(glob.cct || 3000);
     const R = { L: Math.max(L, W), W: Math.min(L, W), H, E: nr.E, Ke: 0.8, rp: 0.7, rc: 0.5, rr: 0.2 };
-    // общий свет
-    const surface = room.ceiling === 'бетон';
-    let fx = all().filter(x => MT.inPrice(x) && x.g === 'Technical' && MT.features(x).cap === 'GU10' && (surface ? ['накладной', 'потолочный'].includes(MT.kind(x)) : MT.kind(x) === 'встраиваемый') && (MT.features(x).nl || 1) === 1 && !/трек|магнит/i.test(x.c || ''));
-    if (bath) fx = fx.filter(x => (MT.features(x).ip || 20) >= 44);
-    const fc = fx.filter(x => colorOk(x, col)); if (fc.length) fx = fc;
-    const f = pickTier(fx, tier);
+    // общий свет: тип — по выбору (встраиваемый / накладной) или по потолку; модель — заданная или подобранная по уровню цены
+    const surface = room.mount === 'накладной' || (room.mount !== 'встраиваемый' && room.ceiling === 'бетон');
+    const forced = room.model ? MT.get(String(room.model).trim()) : null;
+    if (room.model && !forced) notes.push(`артикул «${room.model}» не найден в каталоге — модель подобрана автоматически`);
+    let f = forced;
+    if (!f) {
+      let fx = all().filter(x => MT.inPrice(x) && x.g === 'Technical' && MT.features(x).cap === 'GU10' && (surface ? ['накладной', 'потолочный'].includes(MT.kind(x)) : MT.kind(x) === 'встраиваемый') && (MT.features(x).nl || 1) === 1 && !/трек|магнит/i.test(x.c || ''));
+      if (bath) fx = fx.filter(x => (MT.features(x).ip || 20) >= 44);
+      const fc = fx.filter(x => colorOk(x, col)); if (fc.length) fx = fc;
+      f = pickTier(fx, tier);
+    }
+    if (forced && bath && (MT.features(forced).ip || 20) < 44) notes.push(`${forced.a}: IP${MT.features(forced).ip || 20} во влажном помещении — нужен IP44+`);
     let calc = null;
     if (f) {
-      const prof = MT.fixtureProfile(f); if (surface) prof.mount = 'shallow';
-      const ph = MT.photometryFor(f.a); if (ph) { prof.curve = ph.curve; prof.lor = ph.LOR; }   // КСС производителя, если есть
-      const nMin = Math.max(1, Math.round(R.L / 1.5)) * Math.max(1, Math.round(R.W / 1.5));   // шаг встраиваемых ~1–1,5 м
-      const pk = MT.pickSource(prof, R, { existing: nMin, minShare: 1 });
-      if (pk) {
-        rows.push({ a: f.a, qty: pk.n, note: `общий свет, ${nr.E} лк`, group: 'Общий свет' });
-        rows.push({ a: pk.src.a, qty: pk.n, note: `${pk.src.lm} лм, ${pk.src.ang}°`, group: 'Общий свет' });
-        calc = { E: Math.round(pk.E), n: pk.n, src: pk.src.a, fixture: f.a, norm: nr.E };
+      const nMin = Math.max(1, Math.round(R.L / 1.5)) * Math.max(1, Math.round(R.W / 1.5));   // шаг ~1–1,5 м
+      const ph = MT.photometryFor(f.a), cap = MT.features(f).cap;
+      if (!cap) {   // встроенный LED: поток и кривая — из КСС производителя или каталога
+        const F = ph && ph.flux ? ph.flux : f.lm, curve = ph ? ph.curve : MT.beamCurve(f.ang || 60);
+        if (F) { const e = MT.estimate(curve, R, F), n = Math.max(e.N, Math.ceil(nMin * 0.7));
+          rows.push({ a: f.a, qty: n, note: `общий свет, ${nr.E} лк, ${Math.round(F)} лм${ph ? ' (КСС)' : ''}`, group: 'Общий свет' });
+          calc = { E: Math.round(e.En(n)), n, src: 'встроенный LED', fixture: f.a, norm: nr.E }; }
+        else notes.push(`${f.a}: нет данных о потоке — посчитайте на вкладке «Светорасчёт»`);
+      } else {
+        const prof = MT.fixtureProfile(f); if (surface && !forced) prof.mount = 'shallow';
+        if (ph) { prof.curve = ph.curve; prof.lor = ph.LOR; }   // КСС производителя, если есть
+        const pk = MT.pickSource(prof, R, { existing: nMin, minShare: 1 });
+        if (pk) {
+          rows.push({ a: f.a, qty: pk.n, note: `общий свет, ${nr.E} лк`, group: 'Общий свет' });
+          rows.push({ a: pk.src.a, qty: pk.n, note: `${pk.src.lm} лм, ${pk.src.ang}°`, group: 'Общий свет' });
+          calc = { E: Math.round(pk.E), n: pk.n, src: pk.src.a, fixture: f.a, norm: nr.E };
+        } else notes.push(`${f.a}: для цоколя ${cap} нет подходящих ламп в списке — подберите на вкладке «Светорасчёт»`);
       }
     } else notes.push('не найден светильник общего света по условиям');
-    if (room.ceiling === 'натяжной') notes.push('натяжной потолок: под встраиваемые нужны закладные платформы (в ассортименте Maytoni их нет)');
+    if (room.ceiling === 'натяжной' && !surface) notes.push('натяжной потолок: под встраиваемые нужны закладные платформы (в ассортименте Maytoni их нет)');
     // подвесы над столом / островом
     for (const [key, label] of [['table', 'над столом'], ['island', 'над островом']]) {
       const len = +room[key]; if (!(len > 0)) continue;

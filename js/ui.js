@@ -161,10 +161,10 @@
   function rowsHTML(rows, opts = {}) {
     if (!rows || !rows.length) return '<p class="mute">Нет позиций.</p>';
     const { lines, total } = MT.priceKP(rows);
-    let h = '<div class="scroll" style="max-height:none"><table class="t"><tr><th></th>' + (opts.room ? '<th>Помещение</th>' : '') + (opts.group ? '<th>Назначение</th>' : '') + '<th>Артикул</th><th>Наименование</th><th class="num">Кол-во</th><th class="num">РРЦ</th><th class="num">Сумма</th><th>Примечание</th></tr>';
-    lines.forEach(l => { const x = MT.get(l.a);
-      h += `<tr><td>${img(x, 40)}</td>${opts.room ? `<td>${esc(l.room || '')}</td>` : ''}${opts.group ? `<td>${esc(l.group || '')}</td>` : ''}<td><b>${esc(l.a)}</b>${l.st === 'Акция' ? ' <span class="pill">Акция</span>' : ''}</td><td>${esc(l.n)}</td><td class="num">${l.qty}</td><td class="num">${rub(l.p)}</td><td class="num">${rub(l.sum)}</td><td class="mute">${esc(l.note || '')}</td></tr>`; });
-    return h + `<tr><td colspan="${5 + (opts.room ? 1 : 0) + (opts.group ? 1 : 0)}"><b>Итого</b></td><td class="num"><b>${rub(total)}</b></td><td></td></tr></table></div>`;
+    let h = '<div class="scroll" style="max-height:none"><table class="t"><tr><th></th>' + (opts.room ? '<th>Помещение</th>' : '') + (opts.group ? '<th>Назначение</th>' : '') + '<th>Артикул</th><th>Наименование</th><th class="num">Кол-во</th><th class="num">РРЦ</th><th class="num">Сумма</th><th>Примечание</th>' + (opts.actions ? '<th></th>' : '') + '</tr>';
+    lines.forEach((l, i) => { const x = MT.get(l.a);
+      h += `<tr data-ri="${i}"><td>${img(x, 40)}</td>${opts.room ? `<td>${esc(l.room || '')}</td>` : ''}${opts.group ? `<td>${esc(l.group || '')}</td>` : ''}<td><b>${esc(l.a)}</b>${l.st === 'Акция' ? ' <span class="pill">Акция</span>' : ''}</td><td>${esc(l.n)}</td><td class="num">${l.qty}</td><td class="num">${rub(l.p)}</td><td class="num">${rub(l.sum)}</td><td class="mute">${esc(l.note || '')}</td>${opts.actions ? `<td><button class="b ghost sm" data-rep="${i}" title="Заменить на другую модель">заменить</button></td>` : ''}</tr>`; });
+    return h + `<tr><td colspan="${5 + (opts.room ? 1 : 0) + (opts.group ? 1 : 0)}"><b>Итого</b></td><td class="num"><b>${rub(total)}</b></td><td></td>${opts.actions ? '<td></td>' : ''}</tr></table></div>`;
   }
   const warnHTML = list => (list || []).length ? '<div class="note" style="margin-top:8px">' + list.map(w => '• ' + esc(typeof w === 'string' ? w : w.text)).join('<br>') + '</div>' : '';
 
