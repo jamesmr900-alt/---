@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Maytoni · Инструменты комплектатора</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%23111%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%227%22 fill=%22%23b08d57%22/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/app.css?v=202611230053">
+<link rel="stylesheet" href="css/app.css?v=202611230125">
 </head>
 <body>
 <header class="top">
   <div class="logo">MAYTONI<span>комплектатор</span></div>
-  <nav><a href="index.html">Ассистент (ИИ)</a><a href="tools.html" class="on">Инструменты</a></nav>
+  <nav><a href="index.html">Ассистент (ИИ)</a><a href="tools.html" class="on">Инструменты</a><button class="help-btn" id="clearAll" title="Очистить подбор, КП, проект, планы, загруженные PDF — страница вернётся в исходное состояние">⟲ Очистить всё</button></nav>
 </header>
 <main>
   <div class="tabs" id="tabs">
@@ -166,19 +166,19 @@
 </main>
 <footer>Цены — РРЦ 2026 из прайс-листов Maytoni. Расчёт оценочный (метод коэффициента использования, СП 52.13330.2016), не заменяет светотехнический проект.</footer>
 
-<script>window.ASSET_V = '202611230053';</script>
+<script>window.ASSET_V = '202611230125';</script>
 <script src="vendor/xlsx.full.min.js"></script>
-<script src="js/engine.js?v=202611230053"></script>
-<script src="js/help.js?v=202611230053"></script>
-<script src="js/help-content.js?v=202611230053"></script>
-<script src="js/ui.js?v=202611230053"></script>
-<script src="js/kits.js?v=202611230053"></script>
-<script src="js/project.js?v=202611230053"></script>
+<script src="js/engine.js?v=202611230125"></script>
+<script src="js/help.js?v=202611230125"></script>
+<script src="js/help-content.js?v=202611230125"></script>
+<script src="js/ui.js?v=202611230125"></script>
+<script src="js/kits.js?v=202611230125"></script>
+<script src="js/project.js?v=202611230125"></script>
 <script src="js/control/pricedata.js"></script>
 <script src="js/control/catalog.js"></script>
 <script src="js/control/engine.js"></script>
-<script src="js/docs.js?v=202611230053"></script>
-<script type="module" src="js/viz3d.js?v=202611230053"></script>
+<script src="js/docs.js?v=202611230125"></script>
+<script type="module" src="js/viz3d.js?v=202611230125"></script>
 <script>
 (async function () {
   const { $, esc, rub, kp } = MTUI;
@@ -434,6 +434,14 @@
     await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = src + (window.ASSET_V ? '?v=' + window.ASSET_V : ''); sc.onload = ok; sc.onerror = ok; document.body.appendChild(sc); });
   if (window.PROJECT) { PROJECT.restore(); const d = PROJECT.data; if (d && window.PLANNER) d.rooms.forEach(r => PLANNER.syncRoom(r, PROJECT.rowsOf(r.name))); }
   show((location.hash || '#cat').slice(1));})();
+</script>
+<script>
+document.getElementById('clearAll').onclick = () => {
+  if (!confirm('Очистить всё: подбор, КП, рабочий вариант, планы, расчёты, загруженные PDF и импортированные КСС? Отменить будет нельзя.')) return;
+  try { Object.keys(localStorage).filter(k => /^maytoni_/.test(k) && k !== 'maytoni_help_v1').forEach(k => localStorage.removeItem(k)); } catch (e) { }
+  try { sessionStorage.clear(); } catch (e) { }
+  location.replace(location.pathname);   // перезагрузка без #вкладки — всё в памяти сбрасывается
+};
 </script>
 </body>
 </html>

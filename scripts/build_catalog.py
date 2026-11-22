@@ -65,6 +65,11 @@ for x in d:
     if 'ip' in x:
         m=re.search(r'\d{2}',str(x['ip'])); x['ip']='IP'+m.group() if m else x['ip']
     if 'k' in x and re.fullmatch(r'\d+\.0',str(x['k'])): x['k']=str(x['k'])[:-2]
+# новинки без названия в прайсе
+for x in d:
+    if x['a'] in ('TRA034DR-300W-DD-W','TRA034DR-300W-DD-B') and not x.get('n'):
+        x['n']='Источник напряжения встраиваемый Exility 48В, 300Вт универсальный, '+('белый' if x['a'].endswith('W') else 'черный')
+        x.setdefault('c','Блоки питания 48В'); x.setdefault('comp','Магнитная трековая система 23мм EXILITY')
 dst=sys.argv[2] if len(sys.argv)>2 else 'data/catalog.json'
 json.dump(d,open(dst,'w'),ensure_ascii=False,separators=(',',':'))
 print('saved',dst,len(d))

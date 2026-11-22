@@ -157,6 +157,9 @@
   }
   /** Напряжение трековой системы: 48 В — Exility, Exility X (Mini); 24 В — Levity, Flarity, Arity; остальные — по светильникам и блокам системы; 0 — сеть 230 В. */
   const SYSV = [['EXILITY X', 48], ['EXILITY MINI', 48], ['EXILITY IP', 48], ['EXILITY', 48], ['LEVITY', 24], ['FLARITY', 24], ['ARITY', 24]];
+  // Exility (23 мм): встраиваемые блоки — только универсальные TRA034DR-…-DD (с управлением и без); TRX034DR4 сняты с производства
+  const BUILTIN_ONLY = [[/23мм EXILITY$/i, ['TRA034DR-100W-DD-W', 'TRA034DR-200W-DD-W', 'TRA034DR-300W-DD-W', 'TRA034DR-100W-DD-B', 'TRA034DR-200W-DD-B', 'TRA034DR-300W-DD-B']]];
+  const RETIRED = /^TRX034DR4/i;
   function sysVolt(sys, parts) {
     const k = SYSV.find(([n]) => new RegExp('\\b' + n + '$', 'i').test(sys)); if (k) return k[1];
     if (/UNITY|TRINITY|AXITY/i.test(sys)) return 0;
@@ -237,12 +240,14 @@
     if (V && fixW > 0) {
       const psV = x => +((nameOf(x).match(/(\d{2})\s*В(?!т)/) || String(x.c || '').match(/(\d{2})\s*В/) || [])[1] || 0);
       const proto = x => /dali|zigbee|smart|wi-?fi|\brf\b|triac|-DD|-DS|диммир/i.test(x.a + ' ' + nameOf(x));
-      const builtIn = all().filter(x => MT.kind(x) === 'блок питания' && psV(x) === V && /встраив/i.test(nameOf(x)) && String(x.comp || '').split(/;\s*/).includes(o.system) && !/аварийн/i.test(nameOf(x)));
-      const remote = all().filter(x => MT.kind(x) === 'блок питания' && psV(x) === V && !proto(x) && !/встраив|аварийн|[A-Z][a-z]+ity\b/i.test(nameOf(x)) && (o.wet ? true : !/IP\s*6\d/.test(nameOf(x))));
+      const only = BUILTIN_ONLY.find(([re]) => re.test(o.system));
+      const builtIn = only ? only[1].map(a => MT.get(a)).filter(x => x && MT.inPrice(x))
+        : all().filter(x => MT.kind(x) === 'блок питания' && psV(x) === V && /встраив/i.test(nameOf(x)) && String(x.comp || '').split(/;\s*/).includes(o.system) && !/аварийн/i.test(nameOf(x)) && !RETIRED.test(x.a));
+      const remote = all().filter(x => MT.kind(x) === 'блок питания' && psV(x) === V && !proto(x) && !RETIRED.test(x.a) && !/встраив|аварийн|[A-Z][a-z]+ity\b/i.test(nameOf(x)) && (o.wet ? true : !/IP\s*6\d/.test(nameOf(x))));
       const mode = o.psu && o.psu !== 'авто' ? o.psu : (builtIn.length && o.mount !== 'подвесной' ? 'встраиваемый' : 'выносной');
       let ps = mode === 'встраиваемый' ? builtIn : remote;
       if (!ps.length) { ps = mode === 'встраиваемый' ? remote : builtIn; if (ps.length) warn.push(mode === 'встраиваемый' ? `Встраиваемого в шинопровод блока ${V} В для системы нет — взят выносной.` : `Выносного блока ${V} В без протокола не нашлось — взят встраиваемый.`); }
-      if (ps === builtIn || mode === 'встраиваемый') {   // протокол управления встроенного блока — как было
+      if ((ps === builtIn || mode === 'встраиваемый') && !only) {   // протокол управления встроенного блока — как было (кроме Exility: универсальные блоки при любом управлении)
         const pr = o.protocol, byP = pr === 'DALI' ? ps.filter(x => /dali|-DD/i.test(x.a + nameOf(x))) : pr === 'Zigbee' ? ps.filter(x => /smart|-DS/i.test(x.a + nameOf(x))) : ps.filter(x => !proto(x)); if (byP.length) ps = byP; }
       const pc = ps.filter(x => colorOk(x, col)); if (pc.length) ps = pc;
       const need = fixW * 1.2, ws = ps.map(x => x.w || 0).filter(Boolean);
