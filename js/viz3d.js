@@ -111,12 +111,13 @@ export function render(el, scene) {
 
   // светильники
   const lums = expand(Object.assign({}, scene, { room: R }));
-  const groups = {}; let lightCount = 0; const MAXL = 60;
+  const groups = {}, gMats = {}, gCct = {}; let lightCount = 0; const MAXL = 60;
   for (const l of lums) {
     const grp = l.group || 'Общий свет'; (groups[grp] = groups[grp] || []);
     const [x, z] = P(l.x ?? W / 2, l.y ?? L / 2), body = col(l.color), lc = kelvin(l.cct || 3000), lm = +l.lm || 600;
     const beam = Math.min(Math.max(+l.beam || (l.kind === 'recessed' || l.kind === 'track' ? 40 : 120), 10), 170);
     const emis = new THREE.MeshStandardMaterial({ color: lc, emissive: lc, emissiveIntensity: 2.5 });
+    (gMats[grp] = gMats[grp] || []).push(emis); if (!gCct[grp]) gCct[grp] = +l.cct || 3000;
     const items = []; let light = null;
     const add = m => { s.add(m); items.push(m); return m; };
     if (l.kind === 'pendant') {
@@ -152,20 +153,39 @@ export function render(el, scene) {
     if (light && lightCount < MAXL) { s.add(light); items.push(light); lightCount++; }
     groups[grp].push(...items);
   }
-  s.traverse(o => { if (o.isLight && o !== amb) o.intensity *= K; });
+  s.traverse(o => { if (o.isLight && o !== amb) { o.intensity *= K; o.userData.base = o.intensity; } });
 
   // панель управления
   const ui = document.createElement('div'); ui.style.cssText = 'position:absolute;left:8px;top:8px;background:rgba(255,255,255,.88);border-radius:8px;padding:6px 9px;font:12px system-ui;color:#111;display:flex;flex-direction:column;gap:3px;max-width:60%';
-  ui.innerHTML = `<b data-t style="cursor:pointer" title="свернуть"><span>▾</span> ${(scene.title || 'Помещение').replace(/[<>&]/g, '')}</b>` + Object.keys(groups).map(g => `<label style="display:flex;gap:5px;align-items:center;color:#111;flex-direction:row;font-size:12px"><input type="checkbox" data-g="${g.replace(/"/g, '')}" checked>${g.replace(/[<>&]/g, '')}</label>`).join('') +
-    `<label style="display:flex;gap:5px;align-items:center;color:#111;flex-direction:row;font-size:12px">яркость <input type="range" min="0.2" max="3" step="0.1" value="1" data-exp style="width:90px;padding:0"></label>` +
+  const gname = g => g.replace(/[<>&"]/g, '');
+  const SCENES = { 'Всё включено': g => [1, null], 'Вечер': g => [/общий/i.test(g) ? 0.3 : /подсвет|лент/i.test(g) ? 0.6 : 0.9, 2700], 'Ужин': g => [/стол|остров/i.test(g) ? 1 : /общий/i.test(g) ? 0.15 : 0.4, 2700],
+    'Кино': g => [/подсвет|лент/i.test(g) ? 0.3 : 0, 2700], 'Работа / уборка': g => [1.2, 4000], 'Ночник': g => [/бра|подсвет|лент/i.test(g) ? 0.15 : 0, 2700] };
+  ui.innerHTML = `<b data-t style="cursor:pointer" title="свернуть"><span>▾</span> ${(scene.title || 'Помещение').replace(/[<>&]/g, '')}</b>` +
+    `<label style="display:flex;gap:5px;align-items:center;color:#111;flex-direction:row;font-size:12px">сценарий <select data-scene style="font-size:12px;padding:1px 4px">${Object.keys(SCENES).map(n => `<option>${n}</option>`).join('')}</select></label>` +
+    Object.keys(groups).map(g => `<div data-row="${gname(g)}" style="border-top:1px solid #ddd;padding-top:3px"><label style="display:flex;gap:5px;align-items:center;color:#111;flex-direction:row;font-size:12px;font-weight:600"><input type="checkbox" data-g="${gname(g)}" checked>${gname(g)}</label>
+      <label style="display:flex;gap:4px;align-items:center;color:#333;flex-direction:row;font-size:11px">яркость <input type="range" data-b="${gname(g)}" min="0" max="1.5" step="0.05" value="1" style="width:84px;padding:0"><span data-bv>100%</span></label>
+      <label style="display:flex;gap:4px;align-items:center;color:#333;flex-direction:row;font-size:11px">Tцв <input type="range" data-k="${gname(g)}" min="2700" max="6500" step="100" value="${gCct[g] || 3000}" style="width:84px;padding:0"><span data-kv>${gCct[g] || 3000}K</span></label></div>`).join('') +
+    `<label style="display:flex;gap:5px;align-items:center;color:#111;flex-direction:row;font-size:12px;border-top:1px solid #ddd;padding-top:3px">экспозиция <input type="range" min="0.2" max="3" step="0.1" value="1" data-exp style="width:80px;padding:0"></label>` +
     (heat ? `<label style="display:flex;gap:5px;align-items:center;color:#111;flex-direction:row;font-size:12px"><input type="checkbox" data-heat>карта освещённости</label>` : '') +
     `<div style="display:flex;gap:4px"><button data-v="top">сверху</button><button data-v="persp">3D</button><button data-v="in">внутри</button><button data-v="full">⛶</button><button data-v="png">PNG</button></div>`;
+  ui.style.maxHeight = '92%'; ui.style.overflow = 'auto';
+  const gState = {}; Object.keys(groups).forEach(g => { gState[gname(g)] = { b: 1, k: gCct[g] || 3000, on: true, key: g }; });
+  function applyGroup(n) {
+    const st = gState[n], g = st.key, c = kelvin(st.k);
+    groups[g].forEach(o => { if (o.isLight) { o.intensity = (o.userData.base || 0) * st.b; o.color.copy(c); o.visible = st.on; } else o.visible = st.on; });
+    (gMats[g] || []).forEach(m => { m.color.copy(c); m.emissive.copy(c); m.emissiveIntensity = 2.5 * Math.max(0.05, st.b); });
+    const row = ui.querySelector(`[data-row="${n}"]`); if (row) { row.querySelector('[data-bv]').textContent = Math.round(st.b * 100) + '%'; row.querySelector('[data-kv]').textContent = st.k + 'K';
+      row.querySelector('[data-b]').value = st.b; row.querySelector('[data-k]').value = st.k; row.querySelector('[data-g]').checked = st.on; }
+  }
   ui.querySelectorAll('button').forEach(b => b.style.cssText = 'font:11px system-ui;padding:2px 6px;border:1px solid #ccc;border-radius:5px;background:#fff;cursor:pointer');
   wrap.appendChild(ui);
   ui.querySelector('[data-t]').onclick = () => { const hid = ui.dataset.min === '1'; ui.dataset.min = hid ? '0' : '1'; [...ui.children].slice(1).forEach(c => c.style.display = hid ? '' : 'none'); ui.querySelector("[data-t] span").textContent = hid ? "▾" : "▸"; };
   const note = document.createElement('div'); note.style.cssText = 'position:absolute;right:8px;bottom:6px;font:11px system-ui;color:#ddd';
   note.textContent = 'Визуализация иллюстративная; точный вид изделий — по фото в каталоге'; wrap.appendChild(note);
-  ui.querySelectorAll('[data-g]').forEach(cb => cb.onchange = () => groups[cb.dataset.g].forEach(o => { o.visible = cb.checked; }));
+  ui.querySelectorAll('[data-g]').forEach(cb => cb.onchange = () => { gState[cb.dataset.g].on = cb.checked; applyGroup(cb.dataset.g); });
+  ui.querySelectorAll('[data-b]').forEach(r => r.oninput = () => { gState[r.dataset.b].b = +r.value; gState[r.dataset.b].on = +r.value > 0; applyGroup(r.dataset.b); });
+  ui.querySelectorAll('[data-k]').forEach(r => r.oninput = () => { gState[r.dataset.k].k = +r.value; applyGroup(r.dataset.k); });
+  ui.querySelector('[data-scene]').onchange = e => { const f = SCENES[e.target.value]; Object.entries(gState).forEach(([n, st]) => { const [b, k] = f(st.key); st.b = b; st.on = b > 0; if (k) st.k = k; else st.k = gCct[st.key] || 3000; applyGroup(n); }); };
   ui.querySelector('[data-exp]').oninput = e => { renderer.toneMappingExposure = +e.target.value; };
   if (heat) ui.querySelector('[data-heat]').onchange = e => { heat.visible = e.target.checked; };
   ui.querySelectorAll('[data-v]').forEach(b => b.onclick = () => {

@@ -160,7 +160,7 @@
   function trackCalc(o) {
     const tier = o.tier || 'средний', warn = [], rows = [], parts = systemParts(o.system), room = o.room || '';
     if (!parts.length) return { error: 'Выберите трековую систему' };
-    const inb = /встраив/i, wantIn = o.mount === 'встраиваемый' || o.mount === 'натяжной';
+    const inb = /встраив/i, wantIn = o.mount === 'встраиваемый';   // в натяжной потолок — обычный шинопровод в профиле для натяжного потолка
     const mountOk = x => wantIn ? inb.test(nameOf(x)) || !/накладн/i.test(nameOf(x)) : !inb.test(nameOf(x));
     const col = o.color;
     const pick = (re, not, kinds = ['комплектующие', 'аксессуар']) => {
@@ -319,64 +319,102 @@
     if (opt.single) c = c.filter(x => (MT.features(x).nl || 1) === 1);
     if (opt.maxD) c = c.filter(x => !x.dm || x.dm <= opt.maxD);
     const k = c.filter(x => colorOk(x, col)); if (k.length) c = k;
+    if (opt.led) { const l = c.filter(x => !MT.features(x).cap); if (l.length) c = l; }
     return pickTier(c, tier);
   }
-  /** room: {name, L, W, S, H, ceiling:'ГКЛ'|'натяжной'|'бетон', color, table, island, strip, bra, accent} → строки варианта */
+  /* Назначение ленты → параметры подбора. Профиль подбирается только для световой линии (без него линии нет). */
+  const STRIP_USE = {
+    'карниз': { label: 'закарнизная подсветка', wpm: 9.6 },
+    'кухня': { label: 'рабочая поверхность кухни', wpm: 14.4, cct: 4000 },
+    'ниша': { label: 'ниши и полки', wpm: 4.8 },
+    'линия': { label: 'световая линия', wpm: 14.4, profile: true },
+    'парящий': { label: 'парящий потолок / контур', wpm: 9.6 },
+    'ступени': { label: 'ступени, пол', wpm: 4.8 },
+    'ванная': { label: 'влажная зона', wpm: 9.6, ip: 65 },
+  };
+  const STRETCH_FRAMELESS = ['Neo', 'Intro', 'Intro 2.0'];
+  const isTRS = x => /TRS/.test(x.a);
+  const isStretchFL = x => STRETCH_FRAMELESS.includes(x.se) && /светильник/i.test(nameOf(x));
+  const ledFlux = x => { const ph = MT.photometryFor(x.a); return ph && ph.flux ? ph.flux : x.lm || 0; };
+  /** room: {name, L, W, S, H, ceiling, mount, model, frameless, color, table, island, stripUse, strip, track, trackMount, bra, accentColor} → строки варианта */
   function roomKit(room, tier, glob = {}) {
     const rows = [], notes = [], name = room.name || 'Помещение';
     let L = +room.L, W = +room.W; const S = +room.S; if (!(L > 0 && W > 0) && S > 0) { L = Math.sqrt(S * 1.3); W = S / L; }
     if (!(L > 0 && W > 0)) return { rows, notes: ['нет размеров'], calc: null };
     const H = +room.H || 2.75, nr = MT.normFor(name), bath = nr.id === 'bath', col = room.color || glob.color || 'белый', cct = +(glob.cct || 3000);
     const R = { L: Math.max(L, W), W: Math.min(L, W), H, E: nr.E, Ke: 0.8, rp: 0.7, rc: 0.5, rr: 0.2 };
-    // общий свет: тип — по выбору (встраиваемый / накладной) или по потолку; модель — заданная или подобранная по уровню цены
+    // ---- общий свет: тип монтажа, безрамочность, модель, LED / сменная лампа ----
     const surface = room.mount === 'накладной' || (room.mount !== 'встраиваемый' && room.ceiling === 'бетон');
+    const frameless = !!room.frameless && !surface;
+    if (room.frameless && surface) notes.push('безрамочный монтаж возможен только во встраиваемых светильниках — для накладных не учитывается');
     const forced = room.model ? MT.get(String(room.model).trim()) : null;
     if (room.model && !forced) notes.push(`артикул «${room.model}» не найден в каталоге — модель подобрана автоматически`);
-    let f = forced;
+    let f = forced, mode = '';
     if (!f) {
-      let fx = all().filter(x => MT.inPrice(x) && x.g === 'Technical' && MT.features(x).cap === 'GU10' && (surface ? ['накладной', 'потолочный'].includes(MT.kind(x)) : MT.kind(x) === 'встраиваемый') && (MT.features(x).nl || 1) === 1 && !/трек|магнит/i.test(x.c || ''));
+      let fx = all().filter(x => x.g === 'Technical' && (MT.features(x).nl || 1) === 1 && !/трек|магнит/i.test(x.c || '') && /светильник/i.test(nameOf(x)) && (surface ? ['накладной', 'потолочный'].includes(MT.kind(x)) : MT.kind(x) === 'встраиваемый'));
+      if (!surface) {
+        if (frameless && room.ceiling === 'ГКЛ') { fx = fx.filter(isTRS); mode = 'безрамочные под шпаклёвку (TRS)'; }
+        else if (frameless && room.ceiling === 'натяжной') { fx = fx.filter(isStretchFL); mode = 'безрамочные в натяжной потолок (Neo, Intro, Intro 2.0)'; }
+        else { fx = fx.filter(x => !isTRS(x) && !isStretchFL(x)); if (frameless) notes.push('безрамочный монтаж — для ГКЛ или натяжного потолка; подобраны обычные встраиваемые'); }
+      }
       if (bath) fx = fx.filter(x => (MT.features(x).ip || 20) >= 44);
       const fc = fx.filter(x => colorOk(x, col)); if (fc.length) fx = fc;
-      f = pickTier(fx, tier);
+      const caps = fx.filter(x => ['GU10', 'GX53'].includes(MT.features(x).cap));
+      const leds = fx.filter(x => !MT.features(x).cap && ledFlux(x) > 0 && (!MT.features(x).cct || MT.features(x).cct === cct || MT.features(x).cct === 'сменная'));
+      // премиум — при прочих равных светильники со встроенным LED; бюджет и средний — под сменную лампу
+      const pool = tier === 'премиум' ? (leds.length ? leds : caps) : (caps.length ? caps : leds);
+      f = pickTier(pool, tier);
+      if (!f && frameless) notes.push('нет безрамочных светильников по условиям (цвет, IP) — снимите галочку или смените цвет');
     }
     if (forced && bath && (MT.features(forced).ip || 20) < 44) notes.push(`${forced.a}: IP${MT.features(forced).ip || 20} во влажном помещении — нужен IP44+`);
     let calc = null;
     if (f) {
       const nMin = Math.max(1, Math.round(R.L / 1.5)) * Math.max(1, Math.round(R.W / 1.5));   // шаг ~1–1,5 м
-      const ph = MT.photometryFor(f.a), cap = MT.features(f).cap;
+      const ph = MT.photometryFor(f.a), cap = MT.features(f).cap, tag = mode ? `, ${mode}` : '';
       if (!cap) {   // встроенный LED: поток и кривая — из КСС производителя или каталога
-        const F = ph && ph.flux ? ph.flux : f.lm, curve = ph ? ph.curve : MT.beamCurve(f.ang || 60);
+        const F = ledFlux(f), curve = ph ? ph.curve : MT.beamCurve(f.ang || 60);
         if (F) { const e = MT.estimate(curve, R, F), n = Math.max(e.N, Math.ceil(nMin * 0.7));
-          rows.push({ a: f.a, qty: n, note: `общий свет, ${nr.E} лк, ${Math.round(F)} лм${ph ? ' (КСС)' : ''}`, group: 'Общий свет' });
+          rows.push({ a: f.a, qty: n, note: `общий свет, ${nr.E} лк, встроенный LED ${Math.round(F)} лм${ph ? ' (КСС)' : ''}${tag}`, group: 'Общий свет' });
           calc = { E: Math.round(e.En(n)), n, src: 'встроенный LED', fixture: f.a, norm: nr.E }; }
         else notes.push(`${f.a}: нет данных о потоке — посчитайте на вкладке «Светорасчёт»`);
       } else {
-        const prof = MT.fixtureProfile(f); if (surface && !forced) prof.mount = 'shallow';
-        if (ph) { prof.curve = ph.curve; prof.lor = ph.LOR; }   // КСС производителя, если есть
+        const prof = MT.fixtureProfile(f); prof.cap = cap; if (cap === 'GX53') prof.mount = 'gx53'; else if (surface && !forced) prof.mount = 'shallow';
+        if (ph) { prof.curve = ph.curve; prof.lor = ph.LOR; }
         const pk = MT.pickSource(prof, R, { existing: nMin, minShare: 1 });
         if (pk) {
-          rows.push({ a: f.a, qty: pk.n, note: `общий свет, ${nr.E} лк`, group: 'Общий свет' });
+          rows.push({ a: f.a, qty: pk.n, note: `общий свет, ${nr.E} лк${tag}`, group: 'Общий свет' });
           rows.push({ a: pk.src.a, qty: pk.n, note: `${pk.src.lm} лм, ${pk.src.ang}°`, group: 'Общий свет' });
           calc = { E: Math.round(pk.E), n: pk.n, src: pk.src.a, fixture: f.a, norm: nr.E };
         } else notes.push(`${f.a}: для цоколя ${cap} нет подходящих ламп в списке — подберите на вкладке «Светорасчёт»`);
       }
     } else notes.push('не найден светильник общего света по условиям');
-    if (room.ceiling === 'натяжной' && !surface) notes.push('натяжной потолок: под встраиваемые нужны закладные платформы (в ассортименте Maytoni их нет)');
-    // подвесы над столом / островом
+    if (room.ceiling === 'натяжной' && !surface && !(frameless && f && isStretchFL(f))) notes.push('натяжной потолок: под встраиваемые нужны закладные платформы (в ассортименте Maytoni их нет)');
+    // ---- подвесы над столом / островом ----
     for (const [key, label] of [['table', 'над столом'], ['island', 'над островом']]) {
       const len = +room[key]; if (!(len > 0)) continue;
-      const n = Math.max(1, Math.round(len / 0.6)), p = decorFor('подвесной', room.accentColor || col, tier, { single: true, maxD: 400 });
+      const n = Math.max(1, Math.round(len / 0.6)), p = decorFor('подвесной', room.accentColor || col, tier, { single: true, maxD: 400, led: tier === 'премиум' });
       if (p) { rows.push({ a: p.a, qty: n, note: `${label} ${len} м`, group: 'Декоративный свет' });
         const fp = MT.features(p); if (fp.cap) { const lp = lampFor(fp.cap, cct); if (lp) rows.push({ a: lp.a, qty: n * (fp.nl || 1), note: 'лампы к подвесам', group: 'Декоративный свет' }); } }
     }
-    // бра
-    if (+room.bra > 0) { const b = decorFor('настенный', room.accentColor || col, tier);
+    // ---- бра ----
+    if (+room.bra > 0) { const b = decorFor('настенный', room.accentColor || col, tier, { led: tier === 'премиум' });
       if (b) { rows.push({ a: b.a, qty: +room.bra, note: 'бра', group: 'Декоративный свет' }); const fb = MT.features(b);
         if (fb.cap) { const lp = lampFor(fb.cap, cct); if (lp) rows.push({ a: lp.a, qty: +room.bra * (fb.nl || 1), note: 'лампы к бра', group: 'Декоративный свет' }); } } }
-    // подсветка лентой
+    // ---- лента по назначению ----
     if (+room.strip > 0) {
-      const lr = lentaCalc({ segments: [{ name: 'подсветка', len: +room.strip }], volt: 24, mode: 'mono', cct, wpm: 9.6, ip: bath ? 65 : 20, tier, profile: surface ? 'накладной' : 'встраиваемый', profileColor: col === 'черный' ? 'черн' : 'серебр', control: glob.control || 'none', room: name });
-      if (lr.rows) lr.rows.forEach(r => rows.push({ a: r.a, qty: r.qty, note: r.note, group: 'Подсветка' })); else notes.push(lr.error);
+      const u = STRIP_USE[room.stripUse] || STRIP_USE['карниз'];
+      const prof = u.profile ? (room.ceiling === 'натяжной' ? 'натяжной' : room.ceiling === 'бетон' ? 'накладной' : 'встраиваемый') : 'none';
+      const lr = lentaCalc({ segments: [{ name: u.label, len: +room.strip }], volt: 24, mode: 'mono', cct: u.cct || cct, wpm: u.wpm, ip: bath || u.ip ? 65 : 20, tier, profile: prof, profileColor: col === 'черный' ? 'черн' : 'серебр', control: glob.control || 'none', room: name });
+      if (lr.rows) lr.rows.forEach(r => rows.push({ a: r.a, qty: r.qty, note: r.note, group: 'Подсветка: ' + u.label })); else notes.push(lr.error);
+      if (!u.profile) notes.push(`лента (${u.label}): профиль не подбирался — выберите его на вкладке «Комплекты» по месту монтажа`);
+    }
+    // ---- трековая система ----
+    if (+room.track > 0) {
+      const tm = room.trackMount && room.trackMount !== 'авто' ? room.trackMount : (room.ceiling === 'ГКЛ' ? 'встраиваемый' : room.ceiling === 'натяжной' ? 'натяжной' : 'накладной');
+      const sys = glob.trackSystem || trackSystems().find(x => /EXILITY$/.test(x)) || trackSystems()[0];
+      const tr = trackCalc({ system: sys, mount: tm, color: col === 'черный' ? 'черн' : 'бел', runs: [+room.track], auto: { count: Math.max(2, Math.ceil(+room.track / 0.8)), cct, w: 15 }, tier, room: name });
+      if (tr.rows) tr.rows.forEach(r => rows.push({ a: r.a, qty: r.qty, note: r.note, group: 'Трек (' + tm + ')' })); else notes.push(tr.error);
+      (tr.warn || []).filter(w => !/Проверьте по каталогу/.test(w)).forEach(w => notes.push('трек: ' + w));
     }
     return { rows: rows.map(r => Object.assign(r, { room: name })), notes, calc };
   }
@@ -406,6 +444,6 @@
     return out;
   }
 
-  const KITS = { pickTier, lentaCalc, trackSystems, trackCalc, daliCalc, kpRuleCheck, kpCompare, roomKit, wizard, explication, VARIANTS };
+  const KITS = { STRIP_USE, pickTier, lentaCalc, trackSystems, trackCalc, daliCalc, kpRuleCheck, kpCompare, roomKit, wizard, explication, VARIANTS };
   if (typeof module !== 'undefined' && module.exports) module.exports = KITS; else root.KITS = KITS;
 })(typeof window !== 'undefined' ? window : globalThis);

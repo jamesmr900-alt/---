@@ -354,6 +354,7 @@
     f.col = colorOf(x.col)[0] || colorOf(x.n)[0] || colorOf(extra)[0] || null;
     f.ip = parseInt(String(x.ip || (t.match(/IP\s?(\d{2})/i) || [])[1] || '').replace(/\D/g, '')) || null;
     f.out = x.g === 'Outdoor' || /уличн|ландшафт|фасад/i.test(t);
+    f.led = !f.cap && ['встраиваемый', 'накладной', 'потолочный', 'подвесной', 'настенный', 'трековый', 'трековый подвесной', 'линейный', 'ландшафтный', 'прожектор'].includes(f.kind) && (x.lm > 0 || /led|светодиод|\d+\s*вт/i.test(t));
     f.h = x.h; f.d = x.dm || (x.l && x.wd ? Math.max(x.l, x.wd) : x.l); f.w = x.w; f.lm = x.lm; f.ang = x.ang;
     f.nl = x.nl || (((x.n || '').match(/(\d+)\s*[*×x]\s*(E14|E27|G9|GU10|GX53|G4)/i) || [])[1] | 0) || null;
     return f;
@@ -378,6 +379,7 @@
       const ok = B.cct === 'сменная' ? C.cct === 'сменная' : (typeof C.cct === 'number' && Math.abs(C.cct - B.cct) <= 100);
       if (!ok) { hard.push(`Tцв ${C.cct ? C.cct + (typeof C.cct === 'number' ? 'K' : '') : 'не указана'} вместо ${B.cct}${typeof B.cct === 'number' ? 'K' : ''}`); pen += 30; } else why.push('Tцв ' + B.cct + (typeof B.cct === 'number' ? 'K' : ''));
     }
+    if (B.led && C.cap) { hard.push(`сменная лампа ${C.cap} вместо встроенного LED`); pen += 30; } else if (B.led && C.led) why.push('встроенный LED');
     if (B.cap && B.kind !== 'модуль') {
       const modOk = B.kind === 'лампа' && C.kind === 'модуль' && B.cap === 'GU10';
       if (C.cap !== B.cap && !modOk) { hard.push(C.cap ? `цоколь ${C.cap} вместо ${B.cap}` : `встроенный LED вместо цоколя ${B.cap}`); pen += 30; } else if (C.cap === B.cap) why.push('цоколь ' + B.cap);

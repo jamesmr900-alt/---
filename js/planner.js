@@ -271,16 +271,53 @@
   }
   window.PLANNER = {
     fromWizard(room, rows) {
-      let L = room.L, W = room.W; if (!(L > 0 && W > 0) && room.S > 0) { L = Math.sqrt(room.S * 1.3); W = room.S / L; }
-      const p = addRoomPlan(room.name, Math.min(L, W), Math.max(L, W), room.H);
-      rows.forEach(r => { const x = MT.get(r.a); if (!x || MT.cls(x) === 'source' || ['блок питания', 'профиль', 'комплектующие', 'аксессуар', 'контроллер', 'пульт', 'диммер'].includes(MT.kind(x))) return;
-        const k = kindOf(x);
-        if (k === 'strip') { p.items.push({ id: p.seq++, t: 'line', kind: 'strip', a: x.a, x1: 0.15, y1: 0.15, x2: p.W - 0.15, y2: 0.15, group: 'Подсветка' }); return; }
-        if (k === 'pendant') { const n = r.qty; for (let j = 0; j < n; j++) p.items.push({ id: p.seq++, t: 'lum', a: x.a, kind: k, x: sn(p.W / 2 + (j - (n - 1) / 2) * 0.6), y: sn(p.L * 0.7), z: Math.max(1.5, p.H - 0.95), group: 'Над столом' }); if (r.note && /стол/.test(r.note)) p.items.push({ id: p.seq++, t: 'furn', type: 'table', x: sn(p.W / 2), y: sn(p.L * 0.7), w: Math.max(1.2, n * 0.6), d: 0.9, rot: 0 }); return; }
-        if (k === 'wall') { for (let j = 0; j < r.qty; j++) p.items.push({ id: p.seq++, t: 'lum', a: x.a, kind: k, x: sn(p.W * (j + 1) / (r.qty + 1)), y: 0.05, group: 'Бра' }); return; }
-        MT.layout(r.qty, p.W, p.L).forEach(([xx, yy]) => p.items.push({ id: p.seq++, t: 'lum', a: x.a, kind: k, x: sn(xx), y: sn(yy), group: 'Общий свет' }));
-      });
+      this.syncRoom(room, rows); TS.planner.cur = TS.planner.plans.findIndex(p => p.name === room.name);
       sel = null; syncHeader(); loadBg(); fit(); props(); draw();
+    },
+    /** Синхронизация плана с рабочим вариантом: позиции, расставленные вручную, сохраняются, если не изменилось количество. */
+    syncRoom(room, rows) {
+      let L = +room.L, W = +room.W; if (!(L > 0 && W > 0) && room.S > 0) { L = Math.sqrt(room.S * 1.3); W = room.S / L; }
+      const w = +Math.min(L, W).toFixed(2), l = +Math.max(L, W).toFixed(2);
+      let p = TS.planner.plans.find(x => x.name === room.name);
+      if (!p) { if (TS.planner.plans.length === 1 && !TS.planner.plans[0].items.length && /^(Гостиная|Помещение)/.test(TS.planner.plans[0].name) && !TS.planner.plans[0].bg) TS.planner.plans = []; p = newPlan(room.name); TS.planner.plans.push(p); }
+      const resized = Math.abs(p.W - w) > 0.01 || Math.abs(p.L - l) > 0.01; p.W = w; p.L = l; p.H = +room.H || p.H;
+      if (resized) p.items = p.items.filter(i => !i.auto);
+      const want = {};
+      const put = (key, a, kind, qty, extra) => { (want[key] = want[key] || { a, kind, qty: 0, extra }).qty += qty; };
+      for (const r of rows) {
+        const x = MT.get(r.a); if (!x || MT.cls(x) === 'source') continue;
+        const k = MT.kind(x), g = r.group || '', note = r.note || '';
+        if (k === 'шинопровод') { put('Трек: шинопровод', x.a, 'trackbar', 1); continue; }
+        if (['блок питания', 'профиль', 'комплектующие', 'аксессуар', 'контроллер', 'пульт', 'диммер'].includes(k)) continue;
+        if (k === 'лента') { put('Подсветка', x.a, 'strip', 1); continue; }
+        if (/^Общий свет/.test(g)) put('Общий свет', x.a, kindOf(x), r.qty);
+        else if (/^Трек/.test(g)) put('Трек', x.a, kindOf(x), r.qty);
+        else if (/стол/.test(note)) put('Над столом', x.a, kindOf(x), r.qty, { table: +((note.match(/([\d.]+)\s*м/) || [])[1] || 0) });
+        else if (/остров/.test(note)) put('Над островом', x.a, kindOf(x), r.qty, { island: +((note.match(/([\d.]+)\s*м/) || [])[1] || 0) });
+        else if (/бра/.test(note) || k === 'настенный') put('Бра', x.a, 'wall', r.qty);
+        else put('Общий свет', x.a, kindOf(x), r.qty);
+      }
+      // убрать группы, которых больше нет
+      p.items = p.items.filter(i => !i.auto || want[i.gk]);
+      for (const [key, v] of Object.entries(want)) {
+        const ex = p.items.filter(i => i.auto && i.gk === key && i.t !== 'furn');
+        const isLine = v.kind === 'strip' || v.kind === 'trackbar';
+        if (!isLine && ex.length === v.qty) { ex.forEach(i => { i.a = v.a; i.kind = v.kind; }); continue; }
+        if (isLine && ex.length) { ex.forEach(i => { i.a = v.a; }); continue; }
+        p.items = p.items.filter(i => !(i.auto && i.gk === key));
+        const A = o => p.items.push(Object.assign({ id: p.seq++, auto: true, gk: key, group: key.replace(/^Трек: .*/, 'Трек') }, o));
+        if (key === 'Общий свет') MT.layout(v.qty, p.W, p.L).forEach(([xx, yy]) => A({ t: 'lum', a: v.a, kind: v.kind, x: sn(xx), y: sn(yy) }));
+        else if (key === 'Над столом' || key === 'Над островом') {
+          const y = sn(p.L * (key === 'Над столом' ? 0.7 : 0.4)), n = v.qty, len = Math.max(1.2, (v.extra && (v.extra.table || v.extra.island)) || n * 0.6);
+          for (let j = 0; j < n; j++) A({ t: 'lum', a: v.a, kind: 'pendant', x: sn(p.W / 2 + (j - (n - 1) / 2) * Math.min(0.6, len / n)), y, z: Math.max(1.5, p.H - 0.95) });
+          A({ t: 'furn', type: key === 'Над столом' ? 'table' : 'island', x: sn(p.W / 2), y, w: len, d: 0.9, rot: 0 });
+        }
+        else if (key === 'Бра') for (let j = 0; j < v.qty; j++) A({ t: 'lum', a: v.a, kind: 'wall', x: sn(p.W * (j + 1) / (v.qty + 1)), y: 0.05 });
+        else if (key === 'Подсветка') { const len = Math.min(+room.strip || p.W - 0.3, p.W - 0.3); A({ t: 'line', kind: 'strip', a: v.a, x1: sn((p.W - len) / 2), y1: 0.15, x2: sn((p.W + len) / 2), y2: 0.15 }); }
+        else if (key === 'Трек: шинопровод') { const len = Math.min(+room.track || p.L * 0.7, p.L - 0.4); A({ t: 'line', kind: 'trackbar', a: v.a, x1: sn(p.W / 2), y1: sn((p.L - len) / 2), x2: sn(p.W / 2), y2: sn((p.L + len) / 2) }); }
+        else if (key === 'Трек') { const len = Math.min(+room.track || p.L * 0.7, p.L - 0.4); for (let j = 0; j < v.qty; j++) A({ t: 'lum', a: v.a, kind: 'track', x: sn(p.W / 2), y: sn((p.L - len) / 2 + len * (j + 0.5) / v.qty) }); }
+      }
+      if (!el.hidden && S() === p) { syncHeader(); fit(); draw(); } else syncHeader();
     },
     fromCalc(calc, title) {
       const p = addRoomPlan(title || calc.summary.room || 'Помещение', calc.grid.W, calc.grid.L, calc.R.H);
