@@ -9,7 +9,7 @@
      MODEL              — модель, по умолчанию claude-sonnet-5-5
      MAX_TOKENS         — лимит ответа, по умолчанию 4096
      DAILY_LIMIT        — запросов к модели с одного IP в сутки, по умолчанию 150
-     ACCESS_CODE        — необязательный код доступа (если задан, страница спросит его один раз)
+     ACCESS_CODE        — необязательные коды доступа через запятую (страница спросит код один раз; удалите код — доступ по нему закроется)
    Необязательная привязка KV с именем RL — для лимитов, общих для всех серверов Cloudflare. */
 
 const SYSTEM = `Ты — комплектатор-визуализатор компании Maytoni, работаешь на публичной веб-странице. Посетитель описывает объект и пожелания; ты собираешь недостающие данные, подбираешь освещение только из ассортимента Maytoni, считаешь освещённость, собираешь КП и объясняешь результат.
@@ -155,7 +155,7 @@ export default {
     if (req.method !== 'POST' || !url.pathname.endsWith('/chat')) return json({ error: { message: 'not found' } }, 404, cors);
     if (!okOrigin) return json({ error: { message: 'Этот сайт не подключён к прокси (ALLOWED_ORIGINS).' } }, 403, cors);
     if (!env.ANTHROPIC_API_KEY) return json({ error: { message: 'В прокси не задан ключ ANTHROPIC_API_KEY.' } }, 500, cors);
-    if (env.ACCESS_CODE && req.headers.get('x-access-code') !== env.ACCESS_CODE) return json({ error: { message: 'Нужен код доступа.', code: 'access' } }, 401, cors);
+    if (env.ACCESS_CODE && !String(env.ACCESS_CODE).split(',').map(c => c.trim()).filter(Boolean).includes(String(req.headers.get('x-access-code') || '').trim())) return json({ error: { message: 'Нужен код доступа.', code: 'access' } }, 401, cors);
     if (+(req.headers.get('content-length') || 0) > 20e6) return json({ error: { message: 'Слишком большой запрос: уменьшите вложения.' } }, 413, cors);
 
     let body; try { body = await req.json(); } catch (e) { return json({ error: { message: 'bad json' } }, 400, cors); }

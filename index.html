@@ -226,6 +226,10 @@
     room_calc: 'считаю освещённость', show_3d: 'строю 3D-визуализацию', check_kp_zones: 'проверяю КП по зонам', kp_get: 'смотрю КП', kp_set: 'собираю КП', kp_add: 'добавляю в КП' };
 
   /* ---------- Диалог ---------- */
+  function askCode() {
+    $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px"><div class="row"><b>Код доступа к ассистенту</b><input id="codeIn" placeholder="код, который выдал администратор" style="flex:1;min-width:200px"><button class="b sm" id="codeOk">Сохранить</button></div></div>';
+    $('#codeOk').onclick = () => { const c = $('#codeIn').value.trim(); if (c) { localStorage.setItem('maytoni_code', c); $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">Код сохранён — отправьте сообщение ещё раз.</div>'; } };
+  }
   async function callModel() {
     const headers = { 'content-type': 'application/json' };
     const code = localStorage.getItem('maytoni_code'); if (code) headers['x-access-code'] = code;
@@ -242,7 +246,7 @@
     const r = await fetch(API + '/chat', { method: 'POST', headers, body });
     const j = await r.json().catch(() => ({ error: { message: 'Пустой ответ прокси (' + r.status + ')' } }));
     if (r.status === 401 && j.error && j.error.code === 'access') {
-      const c = prompt('Введите код доступа к ассистенту'); if (c) { localStorage.setItem('maytoni_code', c); return callModel(); }
+      localStorage.removeItem('maytoni_code'); askCode(); throw new Error(code ? 'Код доступа не подошёл. Введите другой код над чатом.' : 'Нужен код доступа — введите его над чатом.');
     }
     if (!r.ok || j.error) throw new Error((j.error && (j.error.message || j.error.type)) || ('HTTP ' + r.status));
     return j;
@@ -367,7 +371,7 @@
     try { const c = JSON.parse(localStorage.getItem(CKEY)); if (c && c.cturns) { cturns = c.cturns; if (!log.length) { log = c.log || []; for (const [k, h] of log) add(k, h, false); } } } catch (e) { }
     $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">Ассистент работает через ваш аккаунт Claude: при первом сообщении Claude спросит разрешение.</div>';
   } else if (!API) $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">На этом адресе ассистент не подключён к нейросети: он работает в версии сайта на Vercel (или укажите адрес прокси в <code>js/config.js</code>). Страница <a href="tools.html">Инструменты</a> работает здесь полностью.</div>';
-  else fetch(API + '/health').then(r => r.json()).then(j => { if (!j.key) $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">В прокси не задан ключ Claude API.</div>'; })
+  else fetch(API + '/health').then(r => r.json()).then(j => { if (j.access_code && !localStorage.getItem('maytoni_code')) askCode(); if (!j.key) $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">В прокси не задан ключ Claude API.</div>'; })
     .catch(() => { $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">Прокси недоступен (на Vercel проверьте, что проект развёрнут). Пока работает страница <a href="tools.html">Инструменты</a>.</div>'; });
 })();
 </script>
