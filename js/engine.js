@@ -13,16 +13,17 @@
   async function loadCatalog(url) { const r = await fetch(url || 'data/catalog.json'); return setCatalog(await r.json()); }
   const get = a => BY[String(a || '').trim().toUpperCase()] || null;
   const norm = s => String(s || '').toLowerCase().replace(/ё/g, 'е');
+  const imgOf = x => x && x.i ? 'data/img/' + String(x.a).replace(/[^A-Za-z0-9._-]/g, '_') + '.jpg' : null;
   const inPrice = x => x && x.p > 0 && x.g !== 'Catalog';
 
   /** Тип устройства: ключевое слово, стоящее раньше всех в наименовании («Диммер RGBW DALI…» → диммер,
       «Встраиваемый светильник…» → встраиваемый, «Светодиодная лента…» → лента). */
-  const KIND_RX = [[/набор\s+для|комплектующ|коннектор|соединител|заглушк|ввод\s*питани|токоподвод|крепл[её]н|монтажн\w*\s+(?:кольц|короб|рамк)/i, 'комплектующие'],
+  const KIND_RX = [[/кнопочн[а-яё]*\s+(?:настенн[а-яё]*\s+)?панел|роторн[а-яё]*\s+панел|панел[а-яё]*\s+управлени|сенсорн[а-яё]*\s+панел/i, 'панель управления'], [/конвертер/i, 'конвертер'], [/релейн|реле(?:[^а-яё]|$)/i, 'реле'], [/набор\s+для|комплектующ|коннектор|соединител|заглуш|ввод\s*питани|токоподвод|крепл[её]н|монтажн[а-яё]*\s+(?:кольц|короб|рамк)/i, 'комплектующие'],
     [/аксессуар|рассеивател|диффузор|линз[аы]/i, 'аксессуар'], [/шинопровод/i, 'шинопровод'], [/трек\S*\s+подвес/i, 'трековый подвесной'], [/трек/i, 'трековый'],
     [/встраив|врезн/i, 'встраиваемый'], [/подвес|люстр/i, 'подвесной'], [/(?:^|[^а-яё])бра(?:[^а-яё]|$)|настен/i, 'настенный'], [/торшер|наполь/i, 'напольный'],
     [/настольн/i, 'настольный'], [/накладн/i, 'накладной'], [/потолоч/i, 'потолочный'], [/ландшафт|грунт/i, 'ландшафтный'], [/прожектор/i, 'прожектор'],
     [/линейн/i, 'линейный'], [/неон/i, 'неон'], [/(?:^|[^а-яё])лент/i, 'лента'], [/профил/i, 'профиль'],
-    [/блок\w*\s+питани|источник\w*\s+напряж|трансформатор|power\s*supply/i, 'блок питания'], [/драйвер|источник\w*\s+тока/i, 'драйвер'],
+    [/блок[а-яё]*\s+питани|источник[а-яё]*\s+напряж|трансформатор|power\s*supply/i, 'блок питания'], [/драйвер|источник[а-яё]*\s+тока/i, 'драйвер'],
     [/диммер/i, 'диммер'], [/контроллер/i, 'контроллер'], [/усилител/i, 'усилитель'], [/пульт/i, 'пульт'], [/шлюз|gateway|хаб(?:[^а-яё]|$)/i, 'шлюз'],
     [/датчик/i, 'датчик'], [/выключател/i, 'выключатель'], [/модул/i, 'модуль'], [/ламп|mr16/i, 'лампа']];
   function detectKind(text) {
@@ -31,7 +32,7 @@
     return best;
   }
   function kind(x) { return detectKind(x.n) || detectKind(x.t) || ''; }
-  const CONTROL_KINDS = ['блок питания', 'драйвер', 'контроллер', 'диммер', 'пульт', 'шлюз', 'датчик', 'усилитель', 'выключатель'];
+  const CONTROL_KINDS = ['блок питания', 'драйвер', 'контроллер', 'диммер', 'пульт', 'шлюз', 'датчик', 'усилитель', 'выключатель', 'панель управления', 'конвертер', 'реле'];
   function cls(x) {
     if (['Control'].includes(x.g) || CONTROL_KINDS.includes(kind(x))) return 'control';
     if (x.g === 'Voltega' || ['лампа', 'модуль'].includes(kind(x))) return 'source';
@@ -275,7 +276,7 @@
      цветовая температура, цоколь, напряжение, каналы, IP, уличное/для помещений; 3) цвет; 4) размеры; дальше мощность, поток, угол.
      Если полного совпадения нет — показываются ближайшие варианты с перечнем отличий. */
   const PAIRS = { 'DL048-01W': 'DL042-01-RD-W', 'DL126-GU10-TRS-W': 'DL101-GU10-TRS-W' };
-  const PROTO_RX = [['DALI', /dali|dt\s?[68]/i], ['TRIAC', /triac|симистор|фазов\w+\s+диммир/i], ['0-10V', /[01]\s*-\s*10\s*(?:в|v)?(?![\d])/i], ['Zigbee', /zigbee/i],
+  const PROTO_RX = [['DALI', /dali|dt\s?[68]/i], ['TRIAC', /triac|симистор|фазов[а-яё]+\s+диммир/i], ['0-10V', /[01]\s*-\s*10\s*(?:в|v)?(?![\d])/i], ['Zigbee', /zigbee/i],
     ['Wi-Fi', /wi-?fi|tuya/i], ['RF', /(?:^|[^a-zа-я])rf(?:[^a-zа-я]|$)|радио/i], ['Bluetooth', /bluetooth|(?:^|[^a-z])ble(?:[^a-z]|$)/i], ['KNX', /knx/i],
     ['PWM', /pwm|шим/i], ['DMX', /dmx/i], ['SPI', /(?:^|[^a-z])spi(?:[^a-z]|$)/i], ['ИК', /(?:^|[^а-я])ик(?:[^а-я]|$)|инфракрас|(?:^|[^a-z])ir(?:[^a-z]|$)/i], ['Push', /push|кнопк/i]];
   const COLS = [[/бел|white/i, 'белый'], [/ч[её]рн|black/i, 'черный'], [/золот|gold/i, 'золото'], [/латун|brass/i, 'латунь'], [/хром|chrome/i, 'хром'],
@@ -288,14 +289,14 @@
     const f = { kind: x.kindOverride || kind(x) || detectKind(extra) || '', proto: new Set(), text: t };
     for (const [name, re] of PROTO_RX) if (re.test(t)) f.proto.add(name);
     if (/rgbw|rgb\)?\s*\+\s*w|rgb\)?\s*\+\s*\d{4}/i.test(t)) f.mode = 'RGBW'; else if (/rgb/i.test(t)) f.mode = 'RGB';
-    else if (/mix|cct|комбинир|двухцвет|tunable|сменн\w*\s+цвет|изменяем\w*\s+цвет|dt\s?8|\d{4}\s*[-–]\s*\d{4}\s*[KК]/i.test(t)) f.mode = 'MIX';
+    else if (/mix|cct|комбинир|двухцвет|tunable|сменн[а-яё]*\s+цвет|изменяем[а-яё]*\s+цвет|dt\s?8|\d{4}\s*[-–]\s*\d{4}\s*[KК]/i.test(t)) f.mode = 'MIX';
     else if (/одноцвет|монохром|mono/i.test(t)) f.mode = 'одноцветный';
     let m;
     if (f.mode === 'MIX') f.cct = 'сменная'; else if ((m = String(x.k || '').match(/^\d{4}$/)) || (m = t.match(/(\d{4})\s*[KК](?![а-яёa-z])/i))) f.cct = +(m[1] || m[0]);
     f.cap = (x.cap || (t.match(/\b(GU10|GX53|GU5[.,]3|E14|E27|G9|G4|GX70|GU4)\b/i) || [])[1] || (/mr16/i.test(t) ? 'GU10' : '') || '').toUpperCase().replace(',', '.') || null;
     if ((m = t.match(/(одно|двух|тр[её]х|четыр[её]х|пяти|шести)канальн/i))) f.ch = { 'одно': 1, 'двух': 2, 'трех': 3, 'трёх': 3, 'четырех': 4, 'четырёх': 4, 'пяти': 5, 'шести': 6 }[m[1].toLowerCase()];
     else if ((m = t.match(/(\d)\s*-?\s*канал/i))) f.ch = +m[1];
-    const vs = String(x.v || '') + ' ' + t;
+    const vs = (['блок питания', 'драйвер'].includes(f.kind) ? '' : String(x.v || '') + ' ') + t;   // у блоков питания в поле «напряжение» — вход, выход — в наименовании
     if ((m = vs.match(/(?<![\d,.A-Za-zА-Яа-яЁё])(\d{1,3})\s*(?:-\s*(\d{2,3})\s*)?(?:В|V)(?![а-яёА-ЯЁa-zA-Z])/))) { const lo = +m[1], hi = +(m[2] || m[1]); const n0 = v => v >= 200 ? 230 : v; f.volt = { lo: n0(lo), hi: n0(hi) }; }
     f.col = colorOf(x.col)[0] || colorOf(x.n)[0] || colorOf(extra)[0] || null;
     f.ip = parseInt(String(x.ip || (t.match(/IP\s?(\d{2})/i) || [])[1] || '').replace(/\D/g, '')) || null;
@@ -454,11 +455,11 @@
     if ((m = t.match(/(\d{1,3})\s*(?:°|град)/i))) sp.ang = +m[1];
     if ((m = t.match(/(\d{4})\s*(?:K|К)(?![а-яёa-z])/i))) sp.k = m[1];
     if ((m = t.match(/IP\s?(\d{2})/i))) { sp.ip = 'IP' + m[1]; sp.ipMin = +m[1]; }
-    if ((m = t.match(/(?:Ø|⌀|D\s*=?|диам\w*\.?)\s*(\d{2,4})/i))) sp.dm = +m[1];
+    if ((m = t.match(/(?:Ø|⌀|D\s*=?|диам[а-яё]*\.?)\s*(\d{2,4})/i))) sp.dm = +m[1];
     if ((m = t.match(/(\d{2,4})\s*[x×х*]\s*(\d{2,4})(?:\s*[x×х*]\s*(\d{2,4}))?\s*(?:мм|mm)?/i)) && !/\d\s*[x×*]\s*(E14|E27|G9|GU10)/i.test(m[0])) {
       const a = [m[1], m[2], m[3]].filter(Boolean).map(Number); sp.l = Math.max(...a); sp.h = Math.min(...a); if (a.length === 3) sp.wd = a.sort((p, q) => p - q)[1];
     }
-    if ((m = t.match(/(?:H|высот\w*)\s*=?\s*(\d{2,4})/i))) sp.h = +m[1];
+    if ((m = t.match(/(?:H|высот[а-яё]*)\s*=?\s*(\d{2,4})/i))) sp.h = +m[1];
     if ((m = t.match(/(\d+)\s*[*×x]\s*(E14|E27|G9|GU10|GX53|G4)/i))) { sp.nl = +m[1]; sp.cap = m[2].toUpperCase(); }
     if ((m = t.match(/(?<![\d,.A-Za-zА-Яа-яЁё])(\d{1,3})\s*(?:-\s*(\d{2,3})\s*)?(?:В|V)(?![а-яёА-ЯЁa-zA-Z])/))) sp.v = (+(m[2] || m[1]) <= 48 ? 'DC ' : 'AC ') + m[1] + (m[2] ? '–' + m[2] : '') + ' В';
     if ((m = t.match(/(?<![\w-])(\d+(?:[.,]\d+)?)\s*шт/i))) sp.qty = fnum(m[1]);
@@ -530,7 +531,7 @@
     return { zone, R, norm: nr, fixture: fx, profile: pr, cur, v1, alt };
   }
 
-  const MT = { setCatalog, loadCatalog, get, search, kind, cls, inPrice, NORMS, normFor, beamCurve, parseLDT, normalize, zoneFlux, fwhm,
+  const MT = { imgOf, detectKind, features, setCatalog, loadCatalog, get, search, kind, cls, inPrice, NORMS, normFor, beamCurve, parseLDT, normalize, zoneFlux, fwhm,
     lorFor, beamFor, utilization, estimate, layout, pointGrid, falseColor, SOURCES, sourceList, pickSource, analogs, priceKP,
     kpToXlsx, kpFromSheet, fixtureProfile, checkZone, parseSpec, analogsBySpec, sheetToLines, get catalog() { return CAT; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = MT; else root.MT = MT;

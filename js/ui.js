@@ -144,5 +144,45 @@
     return MT.kpFromSheet(XLSX, wb);
   }
 
-  window.MTUI = { saveFile, $, esc, rub, n1, kp, renderKP, roomCalc, drawMap, calcHTML, readKPFile };
+
+  /* ---------- Фото и таблица результата (подбор, комплекты) ---------- */
+  const img = (x, sz = 44) => { const u = x && MT.imgOf(x); return u ? `<img src="${u}" alt="" loading="lazy" width="${sz}" height="${sz}" style="object-fit:contain;border-radius:6px;background:#fff;border:1px solid var(--line)" onerror="this.style.visibility='hidden'">` : ''; };
+  /** rows: [{room?, a, qty, note?, group?}] → таблица с фото, ценами и итогом. */
+  function rowsHTML(rows, opts = {}) {
+    if (!rows || !rows.length) return '<p class="mute">Нет позиций.</p>';
+    const { lines, total } = MT.priceKP(rows);
+    let h = '<div class="scroll" style="max-height:none"><table class="t"><tr><th></th>' + (opts.room ? '<th>Помещение</th>' : '') + (opts.group ? '<th>Назначение</th>' : '') + '<th>Артикул</th><th>Наименование</th><th class="num">Кол-во</th><th class="num">РРЦ</th><th class="num">Сумма</th><th>Примечание</th></tr>';
+    lines.forEach(l => { const x = MT.get(l.a);
+      h += `<tr><td>${img(x, 40)}</td>${opts.room ? `<td>${esc(l.room || '')}</td>` : ''}${opts.group ? `<td>${esc(l.group || '')}</td>` : ''}<td><b>${esc(l.a)}</b>${l.st === 'Акция' ? ' <span class="pill">Акция</span>' : ''}</td><td>${esc(l.n)}</td><td class="num">${l.qty}</td><td class="num">${rub(l.p)}</td><td class="num">${rub(l.sum)}</td><td class="mute">${esc(l.note || '')}</td></tr>`; });
+    return h + `<tr><td colspan="${5 + (opts.room ? 1 : 0) + (opts.group ? 1 : 0)}"><b>Итого</b></td><td class="num"><b>${rub(total)}</b></td><td></td></tr></table></div>`;
+  }
+  const warnHTML = list => (list || []).length ? '<div class="note" style="margin-top:8px">' + list.map(w => '• ' + esc(typeof w === 'string' ? w : w.text)).join('<br>') + '</div>' : '';
+
+
+  /** Текст PDF построчно (строки собираются по высоте на странице). */
+  async function loadPdfJs() {
+    if (!window.pdfjsLib) await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = window.PDFJS_SRC || 'vendor/pdf.min.js'; sc.onload = ok; sc.onerror = no; document.head.appendChild(sc); });
+    pdfjsLib.GlobalWorkerOptions.workerSrc = window.PDFJS_WORKER || 'vendor/pdf.worker.min.js';
+    return pdfjsLib;
+  }
+  async function pdfLines(file, maxPages = 60) {
+    const lib = await loadPdfJs(), pdf = await lib.getDocument({ data: await file.arrayBuffer() }).promise, out = [];
+    for (let p = 1; p <= Math.min(pdf.numPages, maxPages); p++) {
+      const tc = await (await pdf.getPage(p)).getTextContent(), rows = new Map();
+      for (const it of tc.items) { if (!it.str.trim()) continue; const y = Math.round(it.transform[5] / 3) * 3; if (!rows.has(y)) rows.set(y, []); rows.get(y).push([it.transform[4], it.str]); }
+      [...rows.entries()].sort((a, b) => b[0] - a[0]).forEach(([, r]) => out.push(r.sort((a, b) => a[0] - b[0]).map(x => x[1]).join(' ').replace(/\s+/g, ' ').trim()));
+    }
+    return out;
+  }
+  /** Первая страница PDF картинкой (для подложки плана). */
+  async function pdfPageImage(file, page = 1, maxPx = 2400) {
+    const lib = await loadPdfJs(), pdf = await lib.getDocument({ data: await file.arrayBuffer() }).promise, pg = await pdf.getPage(Math.min(page, pdf.numPages));
+    const v0 = pg.getViewport({ scale: 1 }), vp = pg.getViewport({ scale: Math.min(4, maxPx / Math.max(v0.width, v0.height)) });
+    const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await pg.render({ canvasContext: ctx, viewport: vp }).promise; return { url: c.toDataURL('image/jpeg', 0.85), pages: pdf.numPages, w: c.width, h: c.height };
+  }
+  /** Общее состояние страницы инструментов (для плана, отчёта, проекта). */
+  const TS = window.TS = window.TS || { calcs: [], zones: null, wizard: null, planner: null, kits: [] };
+
+  window.MTUI = { pdfLines, pdfPageImage, loadPdfJs, TS, img, rowsHTML, warnHTML, saveFile, $, esc, rub, n1, kp, renderKP, roomCalc, drawMap, calcHTML, readKPFile };
 })();

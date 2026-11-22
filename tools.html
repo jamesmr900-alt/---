@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Maytoni · Инструменты комплектатора</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%23111%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%227%22 fill=%22%23b08d57%22/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/app.css?v=202611221943">
+<link rel="stylesheet" href="css/app.css?v=202611222011">
 </head>
 <body>
 <header class="top">
@@ -15,10 +15,13 @@
 <main>
   <div class="tabs" id="tabs">
     <button data-t="cat" class="on">Каталог</button>
+    <button data-t="wiz">Подбор с нуля</button>
     <button data-t="calc">Светорасчёт</button>
+    <button data-t="kits">Комплекты</button>
     <button data-t="an">Аналоги</button>
     <button data-t="chk">Проверка КП</button>
-    <button data-t="kp">КП <span id="kpCount" class="pill">0</span></button>
+    <button data-t="plan">План и 3D</button>
+    <button data-t="kp">КП и документы <span id="kpCount" class="pill">0</span></button>
   </div>
   <p class="mute" id="catState">Загружаю каталог…</p>
 
@@ -38,6 +41,9 @@
     </div>
     <div class="card"><div class="scroll" id="catRes"></div></div>
   </section>
+
+  <!-- Подбор с нуля -->
+  <section data-p="wiz" hidden></section>
 
   <!-- Светорасчёт -->
   <section data-p="calc" hidden>
@@ -66,7 +72,7 @@
           <label id="cAngL" hidden>Угол, °<input id="cAng" type="number" value="110"></label>
           <label>Файл КСС (.ldt)<input id="cLdt" type="file" accept=".ldt,.LDT"></label>
         </div>
-        <div class="row" style="margin-top:12px"><button class="b" id="cGo">Рассчитать</button><button class="b ghost" id="c3d" disabled>3D-вид</button><button class="b ghost" id="cToKp" disabled>Добавить в КП</button><span class="mute" id="cMsg"></span></div>
+        <div class="row" style="margin-top:12px"><button class="b" id="cGo">Рассчитать</button><button class="b ghost" id="c3d" disabled>3D-вид</button><button class="b ghost" id="cPlan" disabled>В план</button><button class="b ghost" id="cToKp" disabled>Добавить в КП</button><span class="mute" id="cMsg"></span></div>
         <p class="mute" style="margin-top:10px">В утопленные светильники (Reif, Dot) и Share/Flint ставятся только лампы 38–40° или модули до 60°: широкие источники теряют до половины света в корпусе.</p>
       </div>
       <div class="card"><h3>Результат</h3><div id="cOut" class="mute">Заполните параметры и нажмите «Рассчитать».</div>
@@ -74,6 +80,9 @@
         <div id="c3dBox" style="margin-top:12px"></div></div>
     </div>
   </section>
+
+  <!-- Комплекты -->
+  <section data-p="kits" hidden></section>
 
   <!-- Аналоги -->
   <section data-p="an" hidden>
@@ -116,6 +125,9 @@
     </div>
   </section>
 
+  <!-- План и 3D -->
+  <section data-p="plan" hidden></section>
+
   <!-- КП -->
   <section data-p="kp" hidden>
     <div class="card">
@@ -125,20 +137,39 @@
         <input id="kpNew" placeholder="артикул" style="width:140px"><button class="b ghost" id="kpAdd">+ строка</button><button class="b ghost" id="kpClr">Очистить</button></div>
       <div id="kpBox"></div>
     </div>
+    <div class="card"><h3>Документы и проект</h3>
+      <div class="grid g3">
+        <label>Заказчик (для PDF)<input id="dCust" placeholder="ООО «…»"></label>
+        <label>Подготовил<input id="dMgr" placeholder="ФИО, телефон"></label>
+        <label>Примечание в КП<input id="dNote" placeholder="срок поставки, условия…"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="b" id="dPdf">КП в PDF с фото</button>
+        <button class="b ghost" id="dDocx">Отчёт Word</button>
+        <button class="b ghost" id="dSave">Сохранить проект</button>
+        <label class="b ghost" style="display:inline-flex;flex-direction:row;cursor:pointer;color:var(--ink)">Открыть проект<input type="file" id="dLoad" accept=".json" hidden></label>
+        <span class="mute" id="dMsg"></span>
+      </div>
+      <p class="mute" style="margin-top:8px">Отчёт Word собирает всё, что сделано на странице: КП, проверку по зонам, замечания по правилам, светорасчёты с картами и планы расстановки. Проект — один файл со всеми данными: его можно открыть на другом устройстве или отправить коллеге.</p>
+    </div>
   </section>
 </main>
 <footer>Цены — РРЦ 2026 из прайс-листов Maytoni. Расчёт оценочный (метод коэффициента использования, СП 52.13330.2016), не заменяет светотехнический проект.</footer>
 
+<script>window.ASSET_V = '202611222011';</script>
 <script src="vendor/xlsx.full.min.js"></script>
-<script src="js/engine.js?v=202611221943"></script>
-<script src="js/ui.js?v=202611221943"></script>
-<script type="module" src="js/viz3d.js?v=202611221943"></script>
+<script src="js/engine.js?v=202611222011"></script>
+<script src="js/ui.js?v=202611222011"></script>
+<script src="js/kits.js?v=202611222011"></script>
+<script src="js/docs.js?v=202611222011"></script>
+<script type="module" src="js/viz3d.js?v=202611222011"></script>
 <script>
 (async function () {
   const { $, esc, rub, kp } = MTUI;
   // вкладки
   const show = t => { document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
-    document.querySelectorAll('section[data-p]').forEach(s => s.hidden = s.dataset.p !== t); location.hash = t; };
+    document.querySelectorAll('section[data-p]').forEach(s => s.hidden = s.dataset.p !== t); try { history.replaceState(null, '', '#' + t); } catch (e) { location.hash = t; } window.dispatchEvent(new CustomEvent('tab-shown', { detail: t })); };
+  window.showTab = show;
   document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => show(b.dataset.t));
   if (location.hash) show(location.hash.slice(1));
   const cnt = () => $('#kpCount').textContent = kp.get().rows.length; kp.on(cnt); cnt();
@@ -147,10 +178,10 @@
   $('#catState').textContent = `Каталог: ${n.toLocaleString('ru-RU')} позиций (прайс-листы РРЦ 2026 + каталог характеристик).`;
 
   /* ---- Каталог ---- */
-  const row = x => `<tr><td><b>${esc(x.a)}</b></td><td>${esc(x.n || '')}</td><td>${esc(x.col || '')}</td><td class="num">${x.w ?? ''}</td><td class="num">${x.lm ?? ''}</td><td class="num">${x.ang ? x.ang + '°' : ''}</td><td>${esc(x.k || '')}</td><td>${esc(x.ip || '')}</td><td>${esc(x.cap || '')}</td><td class="num">${rub(x.p)}</td>
+  const row = x => `<tr><td>${MTUI.img(x, 40)}</td><td><b>${esc(x.a)}</b></td><td>${esc(x.n || '')}</td><td>${esc(x.col || '')}</td><td class="num">${x.w ?? ''}</td><td class="num">${x.lm ?? ''}</td><td class="num">${x.ang ? x.ang + '°' : ''}</td><td>${esc(x.k || '')}</td><td>${esc(x.ip || '')}</td><td>${esc(x.cap || '')}</td><td class="num">${rub(x.p)}</td>
     <td>${x.st ? `<span class="pill ${x.st === 'Новинка' ? 'new' : ''}">${esc(x.st)}</span>` : ''}</td>
     <td style="white-space:nowrap"><button class="b sm" data-add="${esc(x.a)}">+ КП</button> <button class="b ghost sm" data-an="${esc(x.a)}">аналоги</button></td></tr>`;
-  const head = '<table class="t"><tr><th>Артикул</th><th>Наименование</th><th>Цвет</th><th class="num">Вт</th><th class="num">лм</th><th class="num">Угол</th><th>K</th><th>IP</th><th>Цоколь</th><th class="num">РРЦ</th><th>Статус</th><th></th></tr>';
+  const head = '<table class="t"><tr><th></th><th>Артикул</th><th>Наименование</th><th>Цвет</th><th class="num">Вт</th><th class="num">лм</th><th class="num">Угол</th><th>K</th><th>IP</th><th>Цоколь</th><th class="num">РРЦ</th><th>Статус</th><th></th></tr>';
   function bindRowBtns(el) {
     el.querySelectorAll('[data-add]').forEach(b => b.onclick = () => { kp.add([{ a: b.dataset.add, qty: 1, room: '' }]); b.textContent = '✓'; });
     el.querySelectorAll('[data-an]').forEach(b => b.onclick = () => { $('#aArt').value = b.dataset.an; show('an'); runAn(); });
@@ -188,9 +219,11 @@
       const c = MTUI.roomCalc(p); lastCalc = c;
       $('#cOut').className = ''; $('#cOut').innerHTML = MTUI.calcHTML(c);
       $('#cMap').hidden = $('#cLeg').hidden = false; MTUI.drawMap($('#cMap'), c, roomName);
-      $('#cToKp').disabled = false; $('#c3d').disabled = false; if (view3d) { view3d.dispose(); view3d = null; $('#c3dBox').innerHTML = ''; }
+      MTUI.TS.calcs = MTUI.TS.calcs.filter(x => x.summary.room !== c.summary.room); MTUI.TS.calcs.push({ summary: c.summary, png: $('#cMap').toDataURL('image/png') });
+      $('#cToKp').disabled = false; $('#c3d').disabled = false; $('#cPlan').disabled = false; if (view3d) { view3d.dispose(); view3d = null; $('#c3dBox').innerHTML = ''; }
     } catch (e) { $('#cOut').className = 'mute'; $('#cOut').textContent = e.message; }
   };
+  $('#cPlan').onclick = () => { if (window.PLANNER) { window.PLANNER.fromCalc(lastCalc, $('#cName').value || lastCalc.summary.room); show('plan'); } };
   $('#cToKp').onclick = () => { const s = lastCalc.summary, room = $('#cName').value || s.room; const rows = [];
     if (s.fixture) rows.push({ room, a: s.fixture, qty: s.count }); if (MT.get(s.source)) rows.push({ room, a: s.source, qty: s.count });
     kp.add(rows); $('#cMsg').textContent = `Добавлено в КП: ${rows.map(r => r.a + ' × ' + r.qty).join(', ')}`; };
@@ -307,6 +340,8 @@
       return out;
     });
     drawZones();
+    const fmtV = o => o ? `${o.fx || ''} + ${o.src} × ${o.n} → ${o.E} лк` : '—';
+    MTUI.TS.zones = zones.map((z, i) => { const r = checked[i]; return { room: z.room, E: z.E, cur: r && r.cur ? `${r.cur.E} лк${r.cur.ok ? '' : ' (ниже нормы)'}` : '—', v1: r ? fmtV(r.v1) : '—', v2: r ? fmtV(r.v2) : '—' }; });
     const bad = checked.filter(c => c && c.cur && !c.cur.ok).length, miss = zones.filter((z, i) => !z.skip && !checked[i]).length;
     $('#kMsg').textContent = `Ниже нормы сейчас: ${bad}.` + (miss ? ` Без размеров: ${miss} — эти зоны перенесутся в КП без изменений.` : '');
     $('#kV1').disabled = $('#kV2').disabled = false;
@@ -321,6 +356,7 @@
     });
     kp.set(rows, v === 'v1' ? 'КП вариант 1 — источники света' : 'КП вариант 2 — замена светильников'); show('kp');
   }
+  window.CHK = { get: () => zones, set: z => { zones = z || []; checked = null; drawZones(); } };
   $('#kV1').onclick = () => buildKP('v1'); $('#kV2').onclick = () => buildKP('v2');
   drawZones();
 
@@ -332,7 +368,18 @@
   $('#kpAdd').onclick = () => { const a = $('#kpNew').value.trim(); if (a) { kp.add([{ a, qty: 1, room: '' }]); $('#kpNew').value = ''; } else $('#kpNew').focus(); };
   $('#kpClr').onclick = e => { const b = e.target; if (b.dataset.sure) { kp.clear(); b.textContent = 'Очистить'; delete b.dataset.sure; } else { b.dataset.sure = 1; b.textContent = 'Точно очистить?'; setTimeout(() => { b.textContent = 'Очистить'; delete b.dataset.sure; }, 3000); } };
   $('#kpFile').onchange = async e => { const f = e.target.files[0]; if (!f) return; const rows = await MTUI.readKPFile(f); kp.set(rows, f.name.replace(/\.\w+$/, '')); };
-})();
+
+  /* ---- Документы ---- */
+  const dmsg = t => $('#dMsg').textContent = t;
+  $('#dPdf').onclick = async () => { if (!kp.get().rows.length) return dmsg('КП пустое'); dmsg('формирую PDF…'); try { await MTDOC.kpPDF(kp.get().rows, { title: kp.get().title, customer: $('#dCust').value, manager: $('#dMgr').value, note: $('#dNote').value }); dmsg('PDF готов'); } catch (e) { dmsg('Ошибка: ' + e.message); } };
+  $('#dDocx').onclick = async () => { dmsg('формирую отчёт…'); try { await MTDOC.reportDOCX({ title: 'Обоснование подбора — ' + (kp.get().title || 'проект') }); dmsg('Отчёт готов'); } catch (e) { dmsg('Ошибка: ' + e.message); } };
+  $('#dSave').onclick = () => MTDOC.saveProject();
+  $('#dLoad').onchange = async e => { const f = e.target.files[0]; if (!f) return; e.target.value = ''; try { await MTDOC.loadProject(f); dmsg('Проект открыт: ' + f.name); } catch (er) { dmsg('Ошибка: ' + er.message); } };
+
+  /* ---- вкладки, которым нужен каталог ---- */
+  for (const src of ['js/tab-wizard.js', 'js/tab-kits.js', 'js/tab-check.js', 'js/planner.js'])
+    await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = src + (window.ASSET_V ? '?v=' + window.ASSET_V : ''); sc.onload = ok; sc.onerror = ok; document.body.appendChild(sc); });
+  if (location.hash) show(location.hash.slice(1));})();
 </script>
 </body>
 </html>

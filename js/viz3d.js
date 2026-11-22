@@ -42,7 +42,7 @@ export function expand(scene) {
     if (Array.isArray(l.points)) { l.points.forEach(p => out.push(Object.assign({}, l, { x: p[0], y: p[1], count: 1, points: undefined }))); continue; }
     if (l.kind === 'pendant' && n <= 4 && l.x != null) { for (let i = 0; i < n; i++) out.push(Object.assign({}, l, { x: l.x + (i - (n - 1) / 2) * 0.45, count: 1 })); continue; }
     if (l.kind === 'wall') { for (let i = 0; i < n; i++) out.push(Object.assign({}, l, { x: R.width * (i + 0.5) / n, y: 0.02, count: 1 })); continue; }
-    if (l.kind === 'strip') { out.push(Object.assign({}, l, { count: 1 })); continue; }
+    if (l.kind === 'strip' || l.kind === 'trackbar') { out.push(Object.assign({}, l, { count: 1 })); continue; }
     const area = l.area || { x: 0, y: 0, w: R.width, l: R.length };
     autoLayout(n, area.w, area.l).forEach(([x, y]) => out.push(Object.assign({}, l, { x: area.x + x, y: area.y + y, count: 1 })));
   }
@@ -130,10 +130,12 @@ export function render(el, scene) {
     } else if (l.kind === 'wall') {
       const zc = l.z ?? 1.8, b = add(new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.2, 0.1), mat(body))); b.position.set(x, zc, z + (l.y < L / 2 ? 0.05 : -0.05));
       light = new THREE.PointLight(lc, lm / (4 * Math.PI), 0, 2); light.position.set(x, zc, z + (l.y < L / 2 ? 0.2 : -0.2));
-    } else if (l.kind === 'strip') {
-      const len = l.length || W * 0.9, zc = l.z ?? H - 0.05, b = add(new THREE.Mesh(new THREE.BoxGeometry(len, 0.015, 0.02), emis)); b.position.set(x, zc, z);
-      const n = Math.min(4, Math.max(1, Math.round(len / 1.2)));
-      for (let i = 0; i < n; i++) { const pl = new THREE.PointLight(lc, lm / n / (4 * Math.PI), 0, 2); pl.position.set(x - len / 2 + len * (i + 0.5) / n, zc - 0.05, z); s.add(pl); items.push(pl); lightCount++; }
+    } else if (l.kind === 'strip' || l.kind === 'trackbar') {
+      const len = l.length || W * 0.9, zc = l.z ?? H - 0.05, ang = -(l.rot || 0) * Math.PI / 180, ca = Math.cos(-ang), sa = Math.sin(-ang);
+      const b = add(new THREE.Mesh(new THREE.BoxGeometry(len, l.kind === 'trackbar' ? 0.035 : 0.015, l.kind === 'trackbar' ? 0.035 : 0.02), l.kind === 'trackbar' ? mat(body, { metalness: 0.3, roughness: 0.5 }) : emis));
+      b.position.set(x, zc, z); b.rotation.y = ang;
+      if (l.kind === 'strip') { const n = Math.min(6, Math.max(1, Math.round(len / 1.2)));
+        for (let i = 0; i < n; i++) { const t = -len / 2 + len * (i + 0.5) / n, pl = new THREE.PointLight(lc, lm / n / (4 * Math.PI), 0, 2); pl.position.set(x + t * ca, zc - 0.05, z + t * sa); s.add(pl); items.push(pl); lightCount++; } }
     } else if (l.kind === 'floor' || l.kind === 'table') {
       const hh = l.kind === 'floor' ? 1.6 : 0.75 + 0.45, st = add(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, hh), mat(body))); st.position.set(x, hh / 2, z);
       const sh = add(new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.22, 0.25, 24, 1, true), mat('#efe9dd', { side: THREE.DoubleSide, emissive: lc, emissiveIntensity: 0.4 }))); sh.position.set(x, hh, z);
