@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Maytoni · Инструменты комплектатора</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%23111%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%227%22 fill=%22%23b08d57%22/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="logo">MAYTONI<span>комплектатор</span></div>
+  <nav><a href="index.html">Ассистент (ИИ)</a><a href="tools.html" class="on">Инструменты</a></nav>
+</header>
+<main>
+  <div class="tabs" id="tabs">
+    <button data-t="cat" class="on">Каталог</button>
+    <button data-t="calc">Светорасчёт</button>
+    <button data-t="an">Аналоги</button>
+    <button data-t="chk">Проверка КП</button>
+    <button data-t="kp">КП <span id="kpCount" class="pill">0</span></button>
+  </div>
+  <p class="mute" id="catState">Загружаю каталог…</p>
+
+  <!-- Каталог -->
+  <section data-p="cat">
+    <div class="card">
+      <div class="grid g6">
+        <label style="grid-column:span 2">Поиск (артикул, серия, тип, цвет)<input id="q" placeholder="например: reif белый, 3097, подвесной золото"></label>
+        <label>Раздел<select id="fGroup"><option value="">все</option><option>Technical</option><option value="Decor">Decorative</option><option>Outdoor</option><option>Ledstrip</option><option value="Control">Управление</option><option value="Voltega">Лампы Voltega</option><option value="Catalog">Нет в прайсе</option></select></label>
+        <label>Тип<select id="fKind"><option value="">любой</option><option>встраиваемый</option><option>накладной</option><option>потолочный</option><option>подвесной</option><option>настенный</option><option>трековый</option><option>линейный</option><option>лампа</option><option>модуль</option><option>лента</option><option>профиль</option><option>блок питания</option><option>контроллер</option></select></label>
+        <label>Цоколь<select id="fCap"><option value="">любой</option><option>GU10</option><option>GX53</option><option>E14</option><option>E27</option><option>G9</option><option>GU5.3</option></select></label>
+        <label>Цвет<input id="fColor" placeholder="белый, черный…"></label>
+      </div>
+      <div class="row" style="margin-top:8px"><label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="fPriced" checked> только с ценой 2026</label>
+        <label style="flex-direction:row;align-items:center;gap:6px">IP от <input id="fIp" type="number" style="width:70px" placeholder="44"></label>
+        <span class="mute" id="catN"></span></div>
+    </div>
+    <div class="card"><div class="scroll" id="catRes"></div></div>
+  </section>
+
+  <!-- Светорасчёт -->
+  <section data-p="calc" hidden>
+    <div class="grid g2">
+      <div class="card">
+        <h3>Помещение</h3>
+        <div class="grid g3">
+          <label style="grid-column:span 3">Назначение (задаёт норму)<select id="cRoom"></select></label>
+          <label>Длина, м<input id="cL" type="number" step="0.01" value="5.19"></label>
+          <label>Ширина, м<input id="cW" type="number" step="0.01" value="4.5"></label>
+          <label>Высота, м<input id="cH" type="number" step="0.01" value="2.75"></label>
+          <label>Норма, лк<input id="cE" type="number" value="200"></label>
+          <label>Коэф. запаса (Kз)<input id="cKe" type="number" step="0.05" value="0.8"></label>
+          <label>Отделка<select id="cRefl"><option value="0.7,0.5,0.2">светлая 70/50/20</option><option value="0.7,0.3,0.1">средняя 70/30/10</option><option value="0.5,0.3,0.1">тёмная 50/30/10</option></select></label>
+          <label style="grid-column:span 3">Название для КП<input id="cName" placeholder="например: 1.5 Гостиная"></label>
+        </div>
+        <h3 style="margin-top:14px">Светильник и источник</h3>
+        <div class="grid g3">
+          <label>Артикул светильника<input id="cFx" value="DL048-01W" placeholder="DL048-01W"></label>
+          <label>Установка<select id="cMount"><option value="deep">встраиваемый утопленный</option><option value="shallow">встраиваемый неглубокий</option><option value="gx53">GX53</option><option value="open">открытый / LED</option></select></label>
+          <label>Цоколь<select id="cCap"><option>GU10</option><option>GX53</option></select></label>
+          <label>Сейчас в КП, шт<input id="cEx" type="number" placeholder="необязательно"></label>
+          <label>Источник<select id="cSrcMode"><option value="auto">подобрать автоматически</option><option value="art">артикул лампы/модуля</option><option value="manual">поток и угол вручную</option></select></label>
+          <label id="cSrcArtL" hidden>Артикул источника<input id="cSrcArt" placeholder="3094"></label>
+          <label id="cLmL" hidden>Поток, лм<input id="cLm" type="number" value="560"></label>
+          <label id="cAngL" hidden>Угол, °<input id="cAng" type="number" value="110"></label>
+          <label>Файл КСС (.ldt)<input id="cLdt" type="file" accept=".ldt,.LDT"></label>
+        </div>
+        <div class="row" style="margin-top:12px"><button class="b" id="cGo">Рассчитать</button><button class="b ghost" id="c3d" disabled>3D-вид</button><button class="b ghost" id="cToKp" disabled>Добавить в КП</button><span class="mute" id="cMsg"></span></div>
+        <p class="mute" style="margin-top:10px">В утопленные светильники (Reif, Dot) и Share/Flint ставятся только лампы 38–40° или модули до 60°: широкие источники теряют до половины света в корпусе.</p>
+      </div>
+      <div class="card"><h3>Результат</h3><div id="cOut" class="mute">Заполните параметры и нажмите «Рассчитать».</div>
+        <canvas class="map" id="cMap" hidden></canvas><div class="legend" id="cLeg" hidden>меньше <i></i> больше</div>
+        <div id="c3dBox" style="margin-top:12px"></div></div>
+    </div>
+  </section>
+
+  <!-- Аналоги -->
+  <section data-p="an" hidden>
+    <div class="grid g2">
+      <div class="card"><h3>По артикулу Maytoni</h3>
+        <div class="row"><input id="aArt" style="flex:1" placeholder="DL048-01W, P044PL-01-30GU10-W, 725013">
+          <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="aOther"> другие серии</label>
+          <button class="b" id="aGo">Подобрать</button></div>
+        <p class="mute">Правила: декоративные — вид, цвет, размер, форма, количество плафонов; технические — поток, угол, мощность, цветовая температура; блоки питания и управление — функции и параметры, габариты в последнюю очередь.</p>
+      </div>
+      <div class="card"><h3>По описанию или из файла (Excel, PDF)</h3>
+        <textarea id="aList" rows="5" style="width:100%" placeholder="Каждая строка — одна позиция: артикул или описание с параметрами, например:
+Светильник встраиваемый поворотный белый GU10 Ø85 мм 12 шт
+Трековый однофазный черный 20Вт 4000K 36° 1800лм
+Подвесной латунь 3*E14 D600
+Блок питания 24В 100Вт DALI"></textarea>
+        <div class="row" style="margin-top:8px">
+          <label class="b ghost" style="display:inline-flex;flex-direction:row;cursor:pointer;color:var(--ink)">📎 Excel / PDF<input type="file" id="aFile" accept=".xlsx,.xls,.csv,.pdf,.txt" hidden></label>
+          <button class="b" id="aListGo">Подобрать по списку</button><span class="mute" id="aMsg"></span></div>
+        <p class="mute">Из PDF читается текстовый слой (сканы без текста не распознаются — для них используйте ассистента). Строки можно поправить перед подбором.</p>
+      </div>
+    </div>
+    <div class="card" id="aOut" hidden></div>
+    <div class="card" id="aListOut" hidden></div>
+  </section>
+
+  <!-- Проверка КП -->
+  <section data-p="chk" hidden>
+    <div class="card">
+      <div class="row"><button class="b ghost" id="kFromKp">Взять зоны из текущего КП</button>
+        <label class="b ghost" style="display:inline-flex;flex-direction:row;cursor:pointer;color:var(--ink)">Загрузить КП (xlsx)<input type="file" id="kFile" accept=".xlsx,.xls,.csv" hidden></label>
+        <button class="b ghost" id="kAdd">+ зона</button>
+        <span class="mute">Замена для V2:</span>
+        <label style="flex-direction:row;align-items:center;gap:4px">утопленный → <input id="kAltDeep" value="DL042-01-RD-W" style="width:140px"></label>
+        <label style="flex-direction:row;align-items:center;gap:4px">неглубокий → <input id="kAltSh" value="DL101-GU10-TRS-W" style="width:150px"></label>
+      </div>
+      <p class="mute">Для каждой зоны укажите размеры (или площадь). Норма подставляется по названию помещения (СП 52.13330), её можно поменять. Количество не опускается ниже 70% от исходного.</p>
+      <div class="scroll"><table class="t" id="kTab"></table></div>
+      <div class="row" style="margin-top:10px"><button class="b" id="kGo">Проверить</button><button class="b ghost" id="kV1" disabled>КП V1 → в работу</button><button class="b ghost" id="kV2" disabled>КП V2 → в работу</button><span class="mute" id="kMsg"></span></div>
+    </div>
+  </section>
+
+  <!-- КП -->
+  <section data-p="kp" hidden>
+    <div class="card">
+      <div class="row" style="margin-bottom:10px"><input id="kpTitle" style="flex:1;min-width:200px" placeholder="Название КП">
+        <button class="b" id="kpX">Скачать xlsx</button>
+        <label class="b ghost" style="display:inline-flex;flex-direction:row;cursor:pointer;color:var(--ink)">Загрузить xlsx<input type="file" id="kpFile" accept=".xlsx,.xls,.csv" hidden></label>
+        <button class="b ghost" id="kpAdd">+ строка</button><button class="b ghost" id="kpClr">Очистить</button></div>
+      <div id="kpBox"></div>
+    </div>
+  </section>
+</main>
+<footer>Цены — РРЦ 2026 из прайс-листов Maytoni. Расчёт оценочный (метод коэффициента использования, СП 52.13330.2016), не заменяет светотехнический проект.</footer>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/ui.js"></script>
+<script type="module" src="js/viz3d.js"></script>
+<script>
+(async function () {
+  const { $, esc, rub, kp } = MTUI;
+  // вкладки
+  const show = t => { document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+    document.querySelectorAll('section[data-p]').forEach(s => s.hidden = s.dataset.p !== t); location.hash = t; };
+  document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => show(b.dataset.t));
+  if (location.hash) show(location.hash.slice(1));
+  const cnt = () => $('#kpCount').textContent = kp.get().rows.length; kp.on(cnt); cnt();
+
+  const n = await MT.loadCatalog('data/catalog.json');
+  $('#catState').textContent = `Каталог: ${n.toLocaleString('ru-RU')} позиций (прайс-листы РРЦ 2026 + каталог характеристик).`;
+
+  /* ---- Каталог ---- */
+  const row = x => `<tr><td><b>${esc(x.a)}</b></td><td>${esc(x.n || '')}</td><td>${esc(x.col || '')}</td><td class="num">${x.w ?? ''}</td><td class="num">${x.lm ?? ''}</td><td class="num">${x.ang ? x.ang + '°' : ''}</td><td>${esc(x.k || '')}</td><td>${esc(x.ip || '')}</td><td>${esc(x.cap || '')}</td><td class="num">${rub(x.p)}</td>
+    <td>${x.st ? `<span class="pill ${x.st === 'Новинка' ? 'new' : ''}">${esc(x.st)}</span>` : ''}</td>
+    <td style="white-space:nowrap"><button class="b sm" data-add="${esc(x.a)}">+ КП</button> <button class="b ghost sm" data-an="${esc(x.a)}">аналоги</button></td></tr>`;
+  const head = '<table class="t"><tr><th>Артикул</th><th>Наименование</th><th>Цвет</th><th class="num">Вт</th><th class="num">лм</th><th class="num">Угол</th><th>K</th><th>IP</th><th>Цоколь</th><th class="num">РРЦ</th><th>Статус</th><th></th></tr>';
+  function bindRowBtns(el) {
+    el.querySelectorAll('[data-add]').forEach(b => b.onclick = () => { kp.add([{ a: b.dataset.add, qty: 1, room: '' }]); b.textContent = '✓'; });
+    el.querySelectorAll('[data-an]').forEach(b => b.onclick = () => { $('#aArt').value = b.dataset.an; show('an'); runAn(); });
+  }
+  let tmr;
+  function runCat() {
+    const f = { priced: $('#fPriced').checked, group: $('#fGroup').value, kind: $('#fKind').value, cap: $('#fCap').value, color: $('#fColor').value.trim(), ip: +$('#fIp').value || 0 };
+    if (f.group === 'Catalog') f.priced = false;
+    const res = MT.search($('#q').value, f, 200);
+    $('#catN').textContent = `найдено: ${res.length}${res.length === 200 ? '+' : ''}`;
+    $('#catRes').innerHTML = res.length ? head + res.map(row).join('') + '</table>' : '<p class="mute">Ничего не найдено.</p>';
+    bindRowBtns($('#catRes'));
+  }
+  ['#q', '#fColor', '#fIp'].forEach(s => $(s).oninput = () => { clearTimeout(tmr); tmr = setTimeout(runCat, 200); });
+  ['#fGroup', '#fKind', '#fCap', '#fPriced'].forEach(s => $(s).onchange = runCat);
+  runCat();
+
+  /* ---- Светорасчёт ---- */
+  $('#cRoom').innerHTML = MT.NORMS.map(x => `<option value="${x.id}">${esc(x.name)} — ${x.E} лк</option>`).join('');
+  $('#cRoom').onchange = () => { const x = MT.NORMS.find(v => v.id === $('#cRoom').value); $('#cE').value = x.E; };
+  $('#cSrcMode').onchange = () => { const m = $('#cSrcMode').value; $('#cSrcArtL').hidden = m !== 'art'; $('#cLmL').hidden = $('#cAngL').hidden = m !== 'manual'; };
+  $('#cFx').onchange = () => { const x = MT.get($('#cFx').value); if (x) { const p = MT.fixtureProfile(x); $('#cMount').value = p.mount; if (p.cap) $('#cCap').value = p.cap; $('#cMsg').textContent = x.n; } else $('#cMsg').textContent = 'Нет в каталоге — задайте тип установки вручную'; };
+  let ldt = null, lastCalc = null, view3d = null;
+  $('#c3d').onclick = () => { if (!window.MT3D) { $('#cMsg').textContent = '3D ещё загружается…'; return; }
+    if (view3d) view3d.dispose(); view3d = MT3D.render($('#c3dBox'), MT3D.sceneFromCalc(lastCalc, { title: $('#cName').value || lastCalc.summary.room }));
+    $('#c3dBox').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
+  $('#cLdt').onchange = async e => { const f = e.target.files[0]; if (!f) { ldt = null; return; } try { ldt = MT.parseLDT(await f.text()); $('#cMsg').textContent = `КСС: ${ldt.name}, LOR ${ldt.LOR}, угол ≈ ${ldt.beam}°`; } catch (er) { ldt = null; $('#cMsg').textContent = 'Не удалось прочитать LDT'; } };
+  $('#cGo').onclick = () => {
+    try {
+      const [rp, rc, rr] = $('#cRefl').value.split(',').map(Number), m = $('#cSrcMode').value;
+      const roomName = $('#cName').value || MT.NORMS.find(v => v.id === $('#cRoom').value).name;
+      const p = { room: roomName, L: +$('#cL').value, W: +$('#cW').value, H: +$('#cH').value, E: +$('#cE').value, Ke: +$('#cKe').value, rp, rc, rr,
+        fixture: MT.get($('#cFx').value) ? $('#cFx').value : null, mount: $('#cMount').value, cap: $('#cCap').value, existing: +$('#cEx').value || 0, ldt };
+      if (m === 'art') p.source = $('#cSrcArt').value; if (m === 'manual') { p.lm = +$('#cLm').value; p.ang = +$('#cAng').value; }
+      const c = MTUI.roomCalc(p); lastCalc = c;
+      $('#cOut').className = ''; $('#cOut').innerHTML = MTUI.calcHTML(c);
+      $('#cMap').hidden = $('#cLeg').hidden = false; MTUI.drawMap($('#cMap'), c, roomName);
+      $('#cToKp').disabled = false; $('#c3d').disabled = false; if (view3d) { view3d.dispose(); view3d = null; $('#c3dBox').innerHTML = ''; }
+    } catch (e) { $('#cOut').className = 'mute'; $('#cOut').textContent = e.message; }
+  };
+  $('#cToKp').onclick = () => { const s = lastCalc.summary, room = $('#cName').value || s.room; const rows = [];
+    if (s.fixture) rows.push({ room, a: s.fixture, qty: s.count }); if (MT.get(s.source)) rows.push({ room, a: s.source, qty: s.count });
+    kp.add(rows); $('#cMsg').textContent = `Добавлено в КП: ${rows.map(r => r.a + ' × ' + r.qty).join(', ')}`; };
+
+  /* ---- Аналоги ---- */
+  const cl = { decor: 'декоративный', tech: 'технический', control: 'оборудование / управление', source: 'источник света' };
+  const anRow = o => `<tr><td><b>${o.score}%</b></td><td>${esc(o.item.a)}</td><td>${esc(o.item.n || '')}</td><td>${esc(o.item.col || '')}</td><td class="num">${o.item.w ?? ''}</td><td class="num">${[o.item.h, o.item.dm || o.item.l, o.item.wd].filter(Boolean).join('×')}</td><td class="num">${rub(o.item.p)}</td><td class="mute">${esc(o.why.join(', '))}</td><td><button class="b sm" data-add="${esc(o.item.a)}">+ КП</button></td></tr>`;
+  const anHead = '<tr><th>Сходство</th><th>Артикул</th><th>Наименование</th><th>Цвет</th><th class="num">Вт</th><th class="num">Размер, мм</th><th class="num">РРЦ</th><th>Почему</th><th></th></tr>';
+  function runAn() {
+    const r = MT.analogs($('#aArt').value, 12, { sameSeries: $('#aOther').checked ? false : true });
+    $('#aOut').hidden = false;
+    if (!r.base) { $('#aOut').innerHTML = '<p class="mute">Артикул не найден в каталоге. Если это изделие другого бренда — впишите его описание справа.</p>'; return; }
+    $('#aOut').innerHTML = `<h3>${esc(r.base.a)} · ${esc(r.base.n || '')}</h3><p class="mute">Класс: ${cl[r.cls]}. ${rub(r.base.p)}</p>` +
+      (r.list.length ? '<div class="scroll"><table class="t">' + anHead + r.list.map(anRow).join('') + '</table></div>' : '<p class="mute">Подходящих аналогов того же типа в прайсе нет.</p>');
+    bindRowBtns($('#aOut'));
+  }
+  $('#aGo').onclick = runAn; $('#aArt').onkeydown = e => { if (e.key === 'Enter') runAn(); };
+
+  async function pdfLines(file) {
+    if (!window.pdfjsLib) await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'vendor/pdf.min.js'; sc.onload = ok; sc.onerror = no; document.head.appendChild(sc); });
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise, out = [];
+    for (let p = 1; p <= Math.min(pdf.numPages, 60); p++) {
+      const tc = await (await pdf.getPage(p)).getTextContent(), rows = new Map();
+      for (const it of tc.items) { if (!it.str.trim()) continue; const y = Math.round(it.transform[5] / 3) * 3; if (!rows.has(y)) rows.set(y, []); rows.get(y).push([it.transform[4], it.str]); }
+      [...rows.entries()].sort((a, b) => b[0] - a[0]).forEach(([, r]) => out.push(r.sort((a, b) => a[0] - b[0]).map(x => x[1]).join(' ').replace(/\s+/g, ' ').trim()));
+    }
+    return out;
+  }
+  const useful = l => { const sp = MT.parseSpec(l); return sp.article || ['kind', 'cap', 'w', 'lm', 'ang', 'k', 'ip', 'col', 'dm', 'wpm'].filter(k => sp[k] != null).length >= 2; };
+  $('#aFile').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return; e.target.value = ''; $('#aMsg').textContent = 'читаю файл…';
+    try {
+      let lines;
+      if (/\.pdf$/i.test(f.name)) lines = await pdfLines(f);
+      else if (/\.txt$/i.test(f.name)) lines = (await f.text()).split(/\r?\n/);
+      else {
+        const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' }), kpRows = MT.kpFromSheet(XLSX, wb);
+        lines = kpRows.length ? kpRows.filter(r => MT.cls(MT.get(r.a) || {}) !== 'source').map(r => `${r.a} ${r.qty} шт${r.room ? ' | ' + r.room : ''}`)
+          : wb.SheetNames.flatMap(n => MT.sheetToLines(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: false, defval: '' })));
+      }
+      const ok = lines.filter(useful);
+      $('#aList').value = ok.slice(0, 300).join('\n');
+      $('#aMsg').textContent = ok.length ? `Найдено позиций: ${ok.length}${ok.length > 300 ? ' (первые 300)' : ''}. Проверьте строки и нажмите «Подобрать».` : 'Не нашёл в файле строк с параметрами светильников.';
+    } catch (er) { $('#aMsg').textContent = 'Не удалось прочитать файл: ' + er.message; }
+  };
+  const SPEC_LABEL = { kind: 'тип', col: 'цвет', cap: 'цоколь', w: 'Вт', wpm: 'Вт/м', lm: 'лм', ang: '°', k: 'K', ip: 'IP', dm: 'Ø', l: 'длина', h: 'высота', nl: 'ламп', v: 'В', shape: 'форма', proto: 'протокол', qty: 'шт' };
+  let listRes = [];
+  $('#aListGo').onclick = () => {
+    const lines = $('#aList').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean).slice(0, 300);
+    listRes = lines.map(l => ({ line: l, r: MT.analogsBySpec(l, 4), pick: 0 }));
+    const box = $('#aListOut'); box.hidden = false;
+    let h = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">Подбор по списку: ${listRes.length} поз.</h3><button class="b" id="aAll">Выбранные → в КП</button></div><div class="scroll" style="max-height:none"><table class="t"><tr><th>Исходная позиция</th><th>Распознано</th><th>Варианты Maytoni (выберите)</th><th class="num">Кол-во</th></tr>`;
+    listRes.forEach((x, i) => {
+      const sp = x.r.spec, chips = sp.article ? `<span class="pill new">артикул ${esc(sp.article)}</span>` :
+        Object.keys(SPEC_LABEL).filter(k => k !== 'qty' && sp[k] != null).map(k => `<span class="pill">${SPEC_LABEL[k]}: ${esc(sp[k])}</span>`).join(' ') || '<span class="pill bad">нет параметров</span>';
+      const opts = x.r.list.map((o, j) => `<label style="flex-direction:row;align-items:flex-start;gap:6px;color:var(--ink);font-size:13px;margin-bottom:3px"><input type="radio" style="width:auto;margin-top:3px" name="ap${i}" value="${j}" ${j === 0 ? 'checked' : ''}><span><b>${esc(o.item.a)}</b> · ${esc(o.item.n || '')} · ${rub(o.item.p)} <span class="mute">${o.score}%${o.why.length ? ' — ' + esc(o.why.slice(0, 3).join(', ')) : ''}</span></span></label>`).join('');
+      h += `<tr><td style="max-width:280px">${esc(x.line.slice(0, 160))}</td><td style="max-width:220px">${chips}</td><td>${opts || '<span class="mute">нет подходящих</span>'}</td><td class="num"><input type="number" min="0" style="width:60px" data-q="${i}" value="${sp.qty || 1}"></td></tr>`;
+    });
+    box.innerHTML = h + '</table></div>';
+    box.querySelectorAll('input[type=radio]').forEach(r => r.onchange = () => { listRes[+r.name.slice(2)].pick = +r.value; });
+    $('#aAll').onclick = () => { const rows = []; listRes.forEach((x, i) => { const o = x.r.list[x.pick]; const q = +box.querySelector(`[data-q="${i}"]`).value; if (o && q > 0) rows.push({ a: o.item.a, qty: q, room: (x.line.match(/шт \| (.+)$/) || [])[1] || '' }); });
+      kp.add(rows); $('#aAll').textContent = `Добавлено: ${rows.length}`; };
+  };
+
+  /* ---- Проверка КП ---- */
+  let zones = [], checked = null;
+  function zonesFromRows(rows) {
+    const by = new Map();
+    for (const r of rows) { if (!by.has(r.room)) by.set(r.room, []); by.get(r.room).push(r); }
+    const out = [];
+    for (const [room, list] of by) {
+      const fxs = list.filter(r => { const x = MT.get(r.a); return x && MT.cls(x) !== 'source' && /GU10|GX53/i.test((x.cap || '') + ' ' + (x.n || '')); });
+      const srcs = list.filter(r => { const x = MT.get(r.a); return x && MT.cls(x) === 'source'; });
+      const other = list.filter(r => !fxs.includes(r) && !srcs.includes(r));
+      fxs.forEach((f, i) => { const s = srcs[i] || srcs[0]; out.push({ room, fixture: f.a, n: f.qty, source: s ? s.a : '', L: '', W: '', S: '', H: 2.75, E: MT.normFor(room).E, other: i === 0 ? other : [] }); });
+      if (!fxs.length) out.push({ room, fixture: '', n: 0, source: '', L: '', W: '', S: '', H: 2.75, E: MT.normFor(room).E, other: list, skip: true });
+    }
+    return out;
+  }
+  function drawZones() {
+    let h = '<tr><th>Помещение</th><th>Светильник</th><th class="num">Шт</th><th>Источник</th><th>Д, м</th><th>Ш, м</th><th>или S, м²</th><th>H, м</th><th>Норма</th><th>Сейчас</th><th>V1: тот же корпус</th><th>V2: замена корпуса</th><th></th></tr>';
+    zones.forEach((z, i) => {
+      const r = checked && checked[i];
+      const cell = (k, w) => `<td><input data-z="${i}" data-k="${k}" value="${esc(z[k])}" style="width:${w}px"></td>`;
+      const res = o => o ? `${esc(o.fx || '')} + <b>${esc(o.src)}</b> × ${o.n}<br><span class="pill ${o.ok ? 'ok' : 'bad'}">${o.E} лк</span>` : '—';
+      h += `<tr>${cell('room', 150)}${cell('fixture', 130)}${cell('n', 44)}${cell('source', 70)}${cell('L', 54)}${cell('W', 54)}${cell('S', 60)}${cell('H', 50)}${cell('E', 52)}
+        <td>${z.skip ? '<span class="mute">без расчёта</span>' : r && r.cur ? `<span class="pill ${r.cur.ok ? 'ok' : 'bad'}">${r.cur.E} лк</span><br><span class="mute">нужно ${r.cur.Nreq}</span>` : '—'}</td>
+        <td>${r ? res(r.v1) : '—'}</td><td>${r ? res(r.v2) : '—'}</td><td><button class="b ghost sm" data-zdel="${i}">✕</button></td></tr>`;
+    });
+    $('#kTab').innerHTML = h;
+    $('#kTab').querySelectorAll('input[data-z]').forEach(inp => inp.onchange = () => { zones[+inp.dataset.z][inp.dataset.k] = inp.value; });
+    $('#kTab').querySelectorAll('[data-zdel]').forEach(b => b.onclick = () => { zones.splice(+b.dataset.zdel, 1); checked = null; drawZones(); });
+  }
+  $('#kFromKp').onclick = () => { zones = zonesFromRows(kp.get().rows); checked = null; drawZones(); $('#kMsg').textContent = `Зон: ${zones.length}`; };
+  $('#kFile').onchange = async e => { const f = e.target.files[0]; if (!f) return; const rows = await MTUI.readKPFile(f); zones = zonesFromRows(rows); checked = null; drawZones(); $('#kMsg').textContent = `Из файла: ${rows.length} строк, зон: ${zones.length}`; };
+  $('#kAdd').onclick = () => { zones.push({ room: '', fixture: 'DL048-01W', n: 6, source: '', L: '', W: '', S: '', H: 2.75, E: 200 }); drawZones(); };
+  const dims = z => { let L = +String(z.L).replace(',', '.'), W = +String(z.W).replace(',', '.'); const S = +String(z.S).replace(',', '.');
+    if (!(L > 0 && W > 0) && S > 0) { L = Math.sqrt(S * 1.3); W = S / L; } return [L, W]; };
+  $('#kGo').onclick = () => {
+    checked = zones.map(z => {
+      if (z.skip || !z.fixture) return null;
+      const [L, W] = dims(z); if (!(L > 0 && W > 0)) return null;
+      const base = { room: z.room, L, W, H: +String(z.H).replace(',', '.') || 2.75, E: +z.E || undefined, existing: +z.n };
+      const out = {};
+      try { if (z.source) { const c = MTUI.roomCalc(Object.assign({}, base, { fixture: z.fixture, source: z.source })); out.cur = { E: Math.round(c.pick.E), Nreq: c.pick.Nreq, ok: c.ok }; } } catch (e) { }
+      try { const c = MTUI.roomCalc(Object.assign({}, base, { fixture: z.fixture })); out.v1 = { fx: z.fixture, src: c.pick.src.a, n: c.pick.n, E: Math.round(c.pick.E), ok: c.ok }; } catch (e) { }
+      const fx = MT.get(z.fixture), pr = fx ? MT.fixtureProfile(fx) : null;
+      const alt = pr && (pr.mount === 'deep' ? $('#kAltDeep').value : pr.mount === 'shallow' ? $('#kAltSh').value : '');
+      try { const c = MTUI.roomCalc(Object.assign({}, base, { fixture: alt && MT.get(alt) ? alt : z.fixture })); out.v2 = { fx: c.fixture?.a, src: c.pick.src.a, n: c.pick.n, E: Math.round(c.pick.E), ok: c.ok }; } catch (e) { }
+      return out;
+    });
+    drawZones();
+    const bad = checked.filter(c => c && c.cur && !c.cur.ok).length, miss = zones.filter((z, i) => !z.skip && !checked[i]).length;
+    $('#kMsg').textContent = `Ниже нормы сейчас: ${bad}.` + (miss ? ` Без размеров: ${miss} — эти зоны перенесутся в КП без изменений.` : '');
+    $('#kV1').disabled = $('#kV2').disabled = false;
+  };
+  function buildKP(v) {
+    const rows = [];
+    zones.forEach((z, i) => {
+      const r = checked && checked[i] && checked[i][v];
+      if (r) { rows.push({ room: z.room, a: r.fx, qty: r.n }); rows.push({ room: z.room, a: r.src, qty: r.n }); }
+      else if (!z.skip && z.fixture) { rows.push({ room: z.room, a: z.fixture, qty: +z.n }); if (z.source) rows.push({ room: z.room, a: z.source, qty: +z.n }); }
+      (z.other || []).forEach(o => rows.push(o));
+    });
+    kp.set(rows, v === 'v1' ? 'КП вариант 1 — источники света' : 'КП вариант 2 — замена светильников'); show('kp');
+  }
+  $('#kV1').onclick = () => buildKP('v1'); $('#kV2').onclick = () => buildKP('v2');
+  drawZones();
+
+  /* ---- КП ---- */
+  MTUI.renderKP($('#kpBox'));
+  const syncTitle = () => $('#kpTitle').value = kp.get().title || ''; kp.on(syncTitle); syncTitle();
+  $('#kpTitle').onchange = () => { kp.get().title = $('#kpTitle').value; kp.set(kp.get().rows, $('#kpTitle').value); };
+  $('#kpX').onclick = () => kp.exportXlsx();
+  $('#kpAdd').onclick = () => { const a = prompt('Артикул'); if (a) kp.add([{ a, qty: 1, room: '' }]); };
+  $('#kpClr').onclick = () => { if (confirm('Очистить КП?')) kp.clear(); };
+  $('#kpFile').onchange = async e => { const f = e.target.files[0]; if (!f) return; const rows = await MTUI.readKPFile(f); kp.set(rows, f.name.replace(/\.\w+$/, '')); };
+})();
+</script>
+</body>
+</html>

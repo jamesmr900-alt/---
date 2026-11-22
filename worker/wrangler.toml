@@ -1,0 +1,15 @@
+name = "maytoni-agent"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://jamesmr900-alt.github.io"
+MODEL = "claude-sonnet-5-5"
+DAILY_LIMIT = "150"
+
+# Общие лимиты по IP (необязательно): создайте KV и раскомментируйте
+# [[kv_namespaces]]
+# binding = "RL"
+# id = "<id пространства KV>"
+
+# Ключ задаётся секретом:  npx wrangler secret put ANTHROPIC_API_KEY

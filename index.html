@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Maytoni · Ассистент-комплектатор</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%23111%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%227%22 fill=%22%23b08d57%22/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="logo">MAYTONI<span>комплектатор</span></div>
+  <nav><a href="index.html" class="on">Ассистент (ИИ)</a><a href="tools.html">Инструменты</a></nav>
+</header>
+<main>
+  <div id="banner"></div>
+  <div class="chatwrap">
+    <div class="chat">
+      <div class="msgs" id="msgs"></div>
+      <div class="composer">
+        <div class="chips" id="atts"></div>
+        <textarea id="inp" placeholder="Опишите объект: помещения, размеры, высота потолка, пожелания… Можно прикрепить план (PDF, фото) или КП (xlsx)."></textarea>
+        <div class="row">
+          <label class="b ghost sm" style="display:inline-flex;flex-direction:row;cursor:pointer;color:var(--ink)">📎 Файл<input type="file" id="file" multiple accept=".pdf,image/*,.xlsx,.xls,.csv,.txt,.ldt" hidden></label>
+          <button class="b ghost sm" id="newChat">Новый диалог</button>
+          <span class="mute" id="status" style="margin-left:auto"></span>
+          <button class="b" id="send">Отправить</button>
+        </div>
+      </div>
+    </div>
+    <div class="side">
+      <div class="card">
+        <div class="row" style="justify-content:space-between"><h3 style="margin:0" id="kpTitle">КП</h3>
+          <div class="row"><button class="b sm" id="kpX">Скачать xlsx</button><button class="b ghost sm" id="kpClr">Очистить</button></div></div>
+        <div id="kpBox" style="margin-top:8px"></div>
+      </div>
+      <div class="card" id="v3dCard" hidden><div class="row" style="justify-content:space-between"><h3 style="margin:0" id="v3dTitle">3D</h3><button class="b ghost sm" id="v3dClose">Скрыть</button></div><div id="v3d" style="margin-top:8px"></div><div id="v3dList" class="mute" style="margin-top:6px"></div></div>
+      <div class="card"><h3>Расчёты</h3><div id="calcs"><p class="mute">Здесь появятся карты освещённости по помещениям.</p></div></div>
+    </div>
+  </div>
+</main>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/ui.js"></script>
+<script type="module" src="js/viz3d.js"></script>
+<script>
+(async function () {
+  'use strict';
+  const { $, esc, kp } = MTUI;
+  const CFG = window.MAYTONI_CONFIG || {};
+  const API = (CFG.workerUrl || '').replace(/\/+$/, '');
+  const HKEY = 'maytoni_chat_v1';
+  let history = [], log = [], atts = [], busy = false;
+
+  /* ---------- Markdown (минимальный) ---------- */
+  function md(src) {
+    const lines = String(src).split('\n'); let out = '', i = 0, list = null;
+    const inline = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>')
+      .replace(/\[([^\]]+)\]\(((?:https?:\/\/|[\w.-]+\.html)[^)\s]*)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    const close = () => { if (list) { out += `</${list}>`; list = null; } };
+    while (i < lines.length) {
+      const l = lines[i];
+      if (/^\s*\|.*\|\s*$/.test(l) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
+        close(); const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+        out += '<table><tr>' + cells(l).map(c => `<th>${inline(c)}</th>`).join('') + '</tr>'; i += 2;
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { out += '<tr>' + cells(lines[i]).map(c => `<td>${inline(c)}</td>`).join('') + '</tr>'; i++; }
+        out += '</table>'; continue;
+      }
+      let m;
+      if ((m = l.match(/^(#{1,4})\s+(.*)/))) { close(); out += `<p><b>${inline(m[2])}</b></p>`; }
+      else if ((m = l.match(/^\s*[-*•]\s+(.*)/))) { if (list !== 'ul') { close(); out += '<ul>'; list = 'ul'; } out += `<li>${inline(m[1])}</li>`; }
+      else if ((m = l.match(/^\s*\d+[.)]\s+(.*)/))) { if (list !== 'ol') { close(); out += '<ol>'; list = 'ol'; } out += `<li>${inline(m[1])}</li>`; }
+      else if (!l.trim()) close();
+      else { close(); out += `<p>${inline(l)}</p>`; }
+      i++;
+    }
+    close(); return out;
+  }
+
+  /* ---------- Отрисовка ---------- */
+  function add(kind, html, save = true) {
+    const d = document.createElement('div'); d.className = 'msg ' + kind; d.innerHTML = html; $('#msgs').appendChild(d);
+    $('#msgs').scrollTop = 1e9; if (save) { log.push([kind, html]); persist(); } return d;
+  }
+  function persist() {
+    try {   // вложения (base64) не сохраняем — только текст
+      const slim = history.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : m.content.map(b =>
+        b.type === 'image' || b.type === 'document' ? { type: 'text', text: '[вложение было в исходном сообщении]' } : b) }));
+      localStorage.setItem(HKEY, JSON.stringify({ history: slim, log: log.slice(-200) }));
+    } catch (e) { }
+  }
+  function welcome() {
+    add('a', md(`Здравствуйте! Я ассистент-комплектатор **Maytoni**. Подберу освещение по плану или размерам, посчитаю освещённость, найду аналоги и соберу КП — его можно скачать в xlsx из панели КП.\n\nОпишите объект или прикрепите план / готовое КП.`), false);
+    const s = document.createElement('div'); s.className = 'suggest';
+    ['Подобрать свет в гостиную 5,2×4,5 м, потолок ГКЛ 2,75 м, белые встраиваемые', 'Проверить моё КП по освещённости (прикреплю xlsx и план)',
+      'Найти аналог для Reif DL048-01W под шпаклёвку', 'Покажи в 3D кухню-гостиную 6×4 м с подвесами над столом'].forEach(t => {
+      const b = document.createElement('button'); b.textContent = t; b.onclick = () => { $('#inp').value = t; $('#inp').focus(); }; s.appendChild(b); });
+    $('#msgs').appendChild(s);
+  }
+
+  /* ---------- Вложения ---------- */
+  const b64 = buf => { let s = '', a = new Uint8Array(buf); for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
+  async function imageBlock(file) {
+    const img = await createImageBitmap(file), k = Math.min(1, 1600 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: c.toDataURL('image/jpeg', 0.85).split(',')[1] } };
+  }
+  async function toBlocks(file) {
+    const name = file.name, low = name.toLowerCase();
+    if (file.type.startsWith('image/')) return [{ type: 'text', text: `Вложение: ${name}` }, await imageBlock(file)];
+    if (low.endsWith('.pdf')) {
+      if (file.size > 12e6) throw new Error(`${name}: PDF больше 12 МБ — сожмите или пришлите нужные страницы`);
+      return [{ type: 'text', text: `Вложение: ${name}` }, { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64(await file.arrayBuffer()) } }];
+    }
+    if (/\.(xlsx|xls|csv)$/.test(low)) {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      let txt = wb.SheetNames.map(n => `Лист «${n}»:\n` + XLSX.utils.sheet_to_csv(wb.Sheets[n], { FS: ' | ', blankrows: false })).join('\n\n');
+      if (txt.length > 60000) txt = txt.slice(0, 60000) + '\n…(обрезано)';
+      const rows = MT.kpFromSheet(XLSX, wb);
+      return [{ type: 'text', text: `Вложение: таблица ${name}${rows.length ? ` (распознано строк КП: ${rows.length})` : ''}\n${txt}` }];
+    }
+    if (low.endsWith('.ldt')) {
+      const t = await file.text(); let info = '';
+      try { const l = MT.parseLDT(t); info = `\nРазбор: ${l.name}, LOR ${l.LOR}, угол ≈ ${l.beam}°, лампа ${l.lampFlux} лм.`; } catch (e) { }
+      return [{ type: 'text', text: `Вложение: КСС ${name}${info}\n${t.slice(0, 4000)}` }];
+    }
+    return [{ type: 'text', text: `Вложение: ${name}\n${(await file.text()).slice(0, 40000)}` }];
+  }
+  function drawAtts() { $('#atts').innerHTML = atts.map((a, i) => `<span class="chip">${esc(a.name)}<button data-i="${i}">✕</button></span>`).join('');
+    $('#atts').querySelectorAll('button').forEach(b => b.onclick = () => { atts.splice(+b.dataset.i, 1); drawAtts(); }); }
+  $('#file').onchange = e => { for (const f of e.target.files) atts.push(f); e.target.value = ''; drawAtts(); };
+
+  /* ---------- Инструменты (выполняются в браузере) ---------- */
+  const short = x => x && { article: x.a, name: x.n, group: x.g, type: x.t, series: x.se, color: x.col, W: x.w, lm: x.lm, angle: x.ang, K: x.k, IP: x.ip, cap: x.cap,
+    price_rub: x.p || null, status: x.st, size_mm: [x.h, x.dm || x.l, x.wd].filter(Boolean).join('×') || undefined, dimming: x.dim, control: x.ctl };
+  const CALCS = {}; let view3d = null;
+  function addCalcCard(calc, title) {
+    CALCS[String(title).toLowerCase()] = calc;
+    const box = $('#calcs'); if (box.querySelector('p.mute')) box.innerHTML = '';
+    const d = document.createElement('div'); d.style.marginBottom = '14px';
+    d.innerHTML = `<b>${esc(title)}</b>${MTUI.calcHTML(calc)}<canvas class="map"></canvas><div class="legend">меньше <i></i> больше</div>`;
+    box.prepend(d); MTUI.drawMap(d.querySelector('canvas'), calc, title);
+    while (box.children.length > 12) box.lastChild.remove();
+  }
+  const zoneCalc = (z, alt) => {
+    const L = z.length || (z.area ? Math.sqrt(z.area * 1.3) : 0), W = z.width || (z.area ? z.area / L : 0);
+    const base = { room: z.room, L, W, H: z.height || 2.75, E: z.target_lux, existing: z.count };
+    const r = { room: z.room, area: +(L * W).toFixed(1) };
+    if (!(L > 0 && W > 0)) return Object.assign(r, { error: 'нет размеров' });
+    try { if (z.source || z.source_flux) { const c = MTUI.roomCalc(Object.assign({}, base, { fixture: z.fixture, source: z.source, lm: z.source_flux, ang: z.source_angle }));
+      r.now = { fixture: z.fixture, source: z.source || 'вручную', count: z.count, E: Math.round(c.pick.E), required: c.pick.Nreq, meets_norm: c.ok }; r.target = c.R.E; } } catch (e) { r.now = { error: e.message }; }
+    try { const c = MTUI.roomCalc(Object.assign({}, base, { fixture: z.fixture })); r.target = c.R.E;
+      r.v1 = { fixture: z.fixture, source: c.pick.src.a, count: c.pick.n, required: c.pick.Nreq, E: Math.round(c.pick.E), meets_norm: c.ok }; } catch (e) { r.v1 = { error: e.message }; }
+    const fx = MT.get(z.fixture), pr = fx ? MT.fixtureProfile(fx) : null, a = pr && (pr.mount === 'deep' ? alt.deep : pr.mount === 'shallow' ? alt.shallow : null);
+    try { const c = MTUI.roomCalc(Object.assign({}, base, { fixture: a && MT.get(a) ? a : z.fixture }));
+      r.v2 = { fixture: c.fixture?.a || z.fixture, source: c.pick.src.a, count: c.pick.n, required: c.pick.Nreq, E: Math.round(c.pick.E), meets_norm: c.ok, replaced: !!a };
+      if (r.v2.replaced) addCalcCard(c, `${z.room} · V2`); } catch (e) { r.v2 = { error: e.message }; }
+    return r;
+  };
+  const TOOLS = {
+    search_catalog: i => MT.search(i.query || '', { group: i.group, kind: i.kind, cap: i.cap, color: i.color, ip: i.ip_min, maxPrice: i.max_price, priced: i.priced_only !== false },
+      Math.min(i.limit || 15, 40)).map(short),
+    get_items: i => (i.articles || []).slice(0, 60).map(a => short(MT.get(a)) || { article: a, error: 'нет в каталоге' }),
+    find_analogs: i => { const r = MT.analogs(i.article, Math.min(i.limit || 8, 20), { sameSeries: i.other_series_only ? false : true });
+      return r.base ? { base: short(r.base), class: r.cls, analogs: r.list.map(o => Object.assign(short(o.item), { similarity: o.score, why: o.why })) } : { error: 'артикул не найден' }; },
+    list_norms: () => MT.NORMS,
+    room_calc: i => { const c = MTUI.roomCalc({ room: i.room, L: i.length, W: i.width, H: i.height, E: i.target_lux, fixture: i.fixture && MT.get(i.fixture) ? i.fixture : null,
+      mount: i.mount, cap: i.cap, existing: i.existing_count, source: i.source, lm: i.source_flux, ang: i.source_angle, Ke: i.maintenance_factor, dimmable: i.dimmable });
+      addCalcCard(c, i.room); const s = c.summary; if (i.fixture && !MT.get(i.fixture)) s.note = 'светильника нет в каталоге — посчитано по типу установки'; return s; },
+    check_kp_zones: i => { const alt = { deep: i.alt_deep || 'DL042-01-RD-W', shallow: i.alt_shallow || 'DL101-GU10-TRS-W' };
+      const res = (i.zones || []).map(z => zoneCalc(z, alt));
+      return { rules: 'Kз 0,8; отражения 70/50/20; количество ≥ 70% от КП', zones: res }; },
+    show_3d: i => {
+      if (!window.MT3D) throw new Error('3D-модуль ещё загружается, повторите');
+      const key = String(i.from_calc || i.title || '').toLowerCase();
+      const calc = CALCS[key] || Object.entries(CALCS).find(([k]) => key && (k.includes(key) || key.includes(k)))?.[1];
+      let scene;
+      if ((!i.luminaires || !i.luminaires.length) && calc) scene = MT3D.sceneFromCalc(calc, { title: i.title || calc.summary.room });
+      else {
+        const rm = i.room || (calc ? { width: calc.grid.W, length: calc.grid.L, height: calc.R.H } : null);
+        if (!rm || !rm.length || !rm.width) throw new Error('нужны размеры помещения (room.length, room.width, room.height) или предварительный room_calc');
+        scene = { title: i.title, room: { length: rm.length, width: rm.width, height: rm.height || 2.7, wall: rm.wall_color, floor: rm.floor_color }, luminaires: [] };
+        if (calc && i.include_calc_layout) scene = Object.assign(MT3D.sceneFromCalc(calc), scene, { luminaires: MT3D.sceneFromCalc(calc).luminaires, heatmap: MT3D.sceneFromCalc(calc).heatmap });
+        for (const l of i.luminaires || []) {
+          const it = l.article ? MT.get(l.article) : null, src = l.source ? MT.get(l.source) : null;
+          const kind = l.kind || (it ? ({ 'встраиваемый': 'recessed', 'подвесной': 'pendant', 'настенный': 'wall', 'трековый': 'track', 'трековый подвесной': 'pendant', 'накладной': 'surface', 'потолочный': 'surface', 'напольный': 'floor', 'настольный': 'table', 'лента': 'strip', 'линейный': 'strip' }[MT.kind(it)] || 'surface') : 'recessed');
+          const lm = l.lm || (src && src.lm ? src.lm * MT.lorFor(it ? MT.fixtureProfile(it).mount : 'open', src.ang || 38) : it && it.lm ? it.lm : (it && it.w ? it.w * 80 : 600));
+          scene.luminaires.push(Object.assign({}, l, { kind, name: l.name || (it && it.n) || '', color: l.color || (it && it.col) || 'white', lm, cct: l.cct || +(String((src || it || {}).k || '').match(/\d{4}/) || [3000])[0], beam: l.beam || (src && src.ang) || (it && it.ang) }));
+        }
+      }
+      scene.furniture = i.furniture || scene.furniture || [];
+      if (view3d) view3d.dispose();
+      $('#v3dCard').hidden = false; $('#v3dTitle').textContent = '3D · ' + (scene.title || 'помещение');
+      view3d = MT3D.render($('#v3d'), scene);
+      const list = MT3D.expand(scene); const cnt = {}; list.forEach(l => { const k = (l.article || l.kind) + (l.name ? ' · ' + l.name : ''); cnt[k] = (cnt[k] || 0) + 1; });
+      $('#v3dList').innerHTML = Object.entries(cnt).map(([k, n]) => esc(k) + ' × ' + n).join('<br>');
+      $('#v3dCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return { shown: true, luminaires: view3d.luminaires, light_sources_rendered: view3d.lights, note: 'посетитель видит интерактивную 3D-сцену справа' };
+    },
+    kp_get: () => { const p = kp.priced(); return { title: kp.get().title, total_rub: p.total, missing_price: p.missing, rows: p.lines.map(l => ({ room: l.room, article: l.a, name: l.n, qty: l.qty, price: l.p, sum: l.sum })) }; },
+    kp_set: i => { kp.set((i.rows || []).map(r => ({ room: r.room, a: r.article, qty: r.qty })), i.title); return TOOLS.kp_get(); },
+    kp_add: i => { kp.add((i.rows || []).map(r => ({ room: r.room, a: r.article, qty: r.qty }))); return TOOLS.kp_get(); },
+  };
+  const TOOL_LABEL = { search_catalog: 'ищу в каталоге', get_items: 'проверяю артикулы', find_analogs: 'подбираю аналоги', list_norms: 'смотрю нормы',
+    room_calc: 'считаю освещённость', show_3d: 'строю 3D-визуализацию', check_kp_zones: 'проверяю КП по зонам', kp_get: 'смотрю КП', kp_set: 'собираю КП', kp_add: 'добавляю в КП' };
+
+  /* ---------- Диалог ---------- */
+  async function callModel() {
+    const headers = { 'content-type': 'application/json' };
+    const code = localStorage.getItem('maytoni_code'); if (code) headers['x-access-code'] = code;
+    const r = await fetch(API + '/chat', { method: 'POST', headers, body: JSON.stringify({ messages: history }) });
+    const j = await r.json().catch(() => ({ error: { message: 'Пустой ответ прокси (' + r.status + ')' } }));
+    if (r.status === 401 && j.error && j.error.code === 'access') {
+      const c = prompt('Введите код доступа к ассистенту'); if (c) { localStorage.setItem('maytoni_code', c); return callModel(); }
+    }
+    if (!r.ok || j.error) throw new Error((j.error && (j.error.message || j.error.type)) || ('HTTP ' + r.status));
+    return j;
+  }
+  async function send() {
+    const text = $('#inp').value.trim(); if (busy || (!text && !atts.length)) return;
+    if (!API) { add('a', md('Ассистент ещё не подключён к нейросети (не указан адрес прокси в `js/config.js`). Пока можно пользоваться страницей [Инструменты](tools.html): каталог, светорасчёт, аналоги, проверка КП.')); return; }
+    busy = true; $('#send').disabled = true;
+    const content = [];
+    try { for (const f of atts) content.push(...await toBlocks(f)); } catch (e) { add('a', esc(e.message)); busy = false; $('#send').disabled = false; return; }
+    if (text) content.push({ type: 'text', text });
+    add('u', esc(text || '') + (atts.length ? `<div class="att">📎 ${atts.map(a => esc(a.name)).join(', ')}</div>` : ''));
+    $('#inp').value = ''; atts = []; drawAtts();
+    const snap = history.length;
+    history.push({ role: 'user', content });
+    const wait = add('a', '<span class="typing"><i></i><i></i><i></i></span>', false);
+    try {
+      for (let step = 0; step < 16; step++) {
+        $('#status').textContent = step ? 'работаю…' : 'думаю…';
+        const res = await callModel();
+        history.push({ role: 'assistant', content: res.content });
+        const texts = res.content.filter(b => b.type === 'text' && b.text.trim());
+        if (texts.length) { wait.remove(); add('a', md(texts.map(b => b.text).join('\n\n'))); $('#msgs').appendChild(wait); }
+        const uses = res.content.filter(b => b.type === 'tool_use');
+        if (res.stop_reason !== 'tool_use' || !uses.length) break;
+        const results = [];
+        for (const u of uses) {
+          add('tool', '⚙ ' + esc(TOOL_LABEL[u.name] || u.name), true);
+          let out, isErr = false;
+          try { out = TOOLS[u.name] ? TOOLS[u.name](u.input || {}) : { error: 'нет такого инструмента' }; } catch (e) { out = { error: e.message }; isErr = true; }
+          let s = JSON.stringify(out); if (s.length > 40000) s = s.slice(0, 40000) + '…';
+          results.push({ type: 'tool_result', tool_use_id: u.id, content: s, is_error: isErr || undefined });
+        }
+        history.push({ role: 'user', content: results });
+        $('#msgs').appendChild(wait);
+      }
+    } catch (e) {
+      add('a', '⚠ ' + esc(e.message) + '<div class="att">Сообщение можно отправить ещё раз.</div>');
+      history = history.slice(0, snap); if (text && !$('#inp').value) $('#inp').value = text;
+    }
+    wait.remove(); persist(); busy = false; $('#send').disabled = false; $('#status').textContent = '';
+  }
+  $('#send').onclick = send;
+  $('#inp').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  $('#newChat').onclick = () => { history = []; log = []; persist(); $('#msgs').innerHTML = ''; welcome(); };
+
+  /* ---------- Старт ---------- */
+  MTUI.renderKP($('#kpBox'), { compact: true });
+  const t = () => $('#kpTitle').textContent = kp.get().title || 'КП'; kp.on(t); t();
+  $('#v3dClose').onclick = () => { if (view3d) view3d.dispose(); view3d = null; $('#v3d').innerHTML = ''; $('#v3dCard').hidden = true; };
+  $('#kpX').onclick = () => kp.exportXlsx(); $('#kpClr').onclick = () => { if (confirm('Очистить КП?')) kp.clear(); };
+  try { const s = JSON.parse(localStorage.getItem(HKEY)); if (s && s.history && s.history.length) { history = s.history; log = s.log || []; } } catch (e) { }
+  welcome(); for (const [k, h] of log) add(k, h, false);
+  $('#status').textContent = 'загружаю каталог…';
+  await MT.loadCatalog('data/catalog.json'); $('#status').textContent = '';
+  if (!API) $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">ИИ не подключён: укажите адрес прокси в <code>js/config.js</code>. Без него работает страница <a href="tools.html">Инструменты</a>.</div>';
+  else fetch(API + '/health').then(r => r.json()).then(j => { if (!j.key) $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">В прокси не задан ключ Claude API.</div>'; })
+    .catch(() => { $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">Прокси недоступен. Пока работает страница <a href="tools.html">Инструменты</a>.</div>'; });
+})();
+</script>
+</body>
+</html>
