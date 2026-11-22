@@ -385,8 +385,8 @@
         if (tf) {
           const ph = MT.photometryFor(tf.a), F = ledFlux(tf), curve = ph ? ph.curve : MT.beamCurve(tf.ang || 36);
           const e = MT.estimate(curve, R, F), nMax = Math.max(1, Math.floor(total / 0.35)), nMinT = Math.max(2, Math.ceil(total / 1.2));
-          nT = Math.min(nMax, Math.max(nMinT, e.N)); Eextra += e.En(nT); fixtures = [{ a: tf.a, qty: nT }];
-          extraNote.push(`трек ${nT} × ${tf.a} ≈ ${Math.round(e.En(nT))} лк`);
+          nT = +room.nTrack > 0 ? Math.round(+room.nTrack) : Math.min(nMax, Math.max(nMinT, e.N)); Eextra += e.En(nT); fixtures = [{ a: tf.a, qty: nT }];
+          extraNote.push(`трек ${nT} × ${tf.a}${+room.nTrack > 0 ? ' (вручную)' : ''} ≈ ${Math.round(e.En(nT))} лк`);
         } else notes.push(`трек: в системе «${sys}» нет светильника цвета «${col}»${glob.control && glob.control !== 'none' ? ' с управлением ' + glob.control : ''}`);
         const tr = trackCalc({ system: sys, mount: tm, color: tcol, runs: geo.runs, L: geo.L, fixtures, tier, protocol: glob.control, room: name });
         if (tr.rows) tr.rows.forEach(r => rows.push({ a: r.a, qty: r.qty, note: r.note + (r.group === 'Светильники' ? ' — по освещённости' : ''), group: `Трек (${shape}, ${tm})` })); else notes.push(tr.error);
@@ -433,22 +433,24 @@
     }
     if (forced && bath && (MT.features(forced).ip || 20) < 44) notes.push(`${forced.a}: IP${MT.features(forced).ip || 20} во влажном помещении — нужен IP44+`);
     let calc = null;
-    if (f && hasExtra && needGeneral <= nr.E * 0.1) { f = null; calc = { E: Math.round(Eextra), n: 0, src: '—', fixture: 'трек / лента', norm: nr.E }; }
+    const manN = +room.nGeneral > 0 ? Math.round(+room.nGeneral) : 0;
+    if (f && !manN && hasExtra && needGeneral <= nr.E * 0.1) { f = null; calc = { E: Math.round(Eextra), n: 0, src: '—', fixture: 'трек / лента', norm: nr.E }; }
     else if (f) {
       const nMin = hasExtra ? 1 : Math.max(1, Math.round(R.L / 1.5)) * Math.max(1, Math.round(R.W / 1.5));   // шаг ~1–1,5 м
       const ph = MT.photometryFor(f.a), cap = MT.features(f).cap, tag = mode ? `, ${mode}` : '';
       if (!cap) {   // встроенный LED: поток и кривая — из КСС производителя или каталога
         const F = ledFlux(f), curve = ph ? ph.curve : MT.beamCurve(f.ang || 60);
-        if (F) { const e = MT.estimate(curve, R, F), n = Math.max(e.N, hasExtra ? 1 : Math.ceil(nMin * 0.7));
-          rows.push({ a: f.a, qty: n, note: `общий свет, ${nr.E} лк, встроенный LED ${Math.round(F)} лм${ph ? ' (КСС)' : ''}${tag}`, group: 'Общий свет' });
+        if (F) { const e = MT.estimate(curve, R, F), n = manN || Math.max(e.N, hasExtra ? 1 : Math.ceil(nMin * 0.7));
+          rows.push({ a: f.a, qty: n, note: `общий свет${manN ? ' (количество задано вручную)' : ''}, ${nr.E} лк, встроенный LED ${Math.round(F)} лм${ph ? ' (КСС)' : ''}${tag}`, group: 'Общий свет' });
           calc = { E: Math.round(e.En(n) + Eextra), n, src: 'встроенный LED', fixture: f.a, norm: nr.E }; }
         else notes.push(`${f.a}: нет данных о потоке — посчитайте на вкладке «Светорасчёт»`);
       } else {
         const prof = MT.fixtureProfile(f); prof.cap = cap; if (cap === 'GX53') prof.mount = 'gx53'; else if (surface && !forced) prof.mount = 'shallow';
         if (ph) { prof.curve = ph.curve; prof.lor = ph.LOR; }
-        const pk = MT.pickSource(prof, R, { existing: hasExtra ? 0 : nMin, minShare: 1 });
+        let pk = MT.pickSource(prof, R, { existing: manN || (hasExtra ? 0 : nMin), minShare: 1 });
+        if (pk && manN) { pk = Object.assign({}, pk.options.filter(o => o.Nreq <= manN).sort((a, b) => a.src.lm - b.src.lm)[0] || pk.options.slice().sort((a, b) => b.src.lm - a.src.lm)[0]); pk.n = manN; pk.E = MT.estimate(pk.curve, R, pk.F).En(manN); }
         if (pk) {
-          rows.push({ a: f.a, qty: pk.n, note: `общий свет, ${nr.E} лк${tag}`, group: 'Общий свет' });
+          rows.push({ a: f.a, qty: pk.n, note: `общий свет${manN ? ' (количество задано вручную)' : ''}, ${nr.E} лк${tag}`, group: 'Общий свет' });
           rows.push({ a: pk.src.a, qty: pk.n, note: `${pk.src.lm} лм, ${pk.src.ang}°`, group: 'Общий свет' });
           calc = { E: Math.round(pk.E + Eextra), n: pk.n, src: pk.src.a, fixture: f.a, norm: nr.E };
         } else notes.push(`${f.a}: для цоколя ${cap} нет подходящих ламп в списке — подберите на вкладке «Светорасчёт»`);

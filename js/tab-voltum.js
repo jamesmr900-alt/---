@@ -5,24 +5,26 @@
   'use strict';
   const { $, esc } = MTUI;
   const el = document.querySelector('section[data-p="eui"]'); if (!el) return;
-  let V = null, rows = [], out = [];
+  let V = null, rows = [], out = [], framesBy = {};
   // тип из проекта → изделие Voltum
   function mapType(t) {
     const s = t.toLowerCase().replace(/ё/g, 'е'), two = /2[\s-]*кл|двух/.test(s), three = /3[\s-]*кл|трех/.test(s), led = /подсвет|индикац/.test(s);
-    if (/380|трехфаз/.test(s)) return { id: null, why: 'розетки 380 В в серии нет — подберите силовую розетку отдельно' };
-    if (/мастер/.test(s)) return { id: 'push1', why: 'мастер-выключатель: кнопка с самовозвратом для импульсного реле' };
-    if (/диммер|светорегул/.test(s)) return { id: 'dim', why: 'поворотно-нажимной светорегулятор 600 Вт (для ламп накаливания, галогенных и диммируемых LED)' };
+    if (/380|трехфаз|силов/.test(s)) return { id: null, why: 'силовой розетки в серии нет (у Voltum розетки только 16 А) — подбирается отдельно' };
+    if (/вентилятор|электровывод|э-вывод|щит/.test(s)) return { id: null, why: 'не ЭУИ Voltum (электровывод / щит) — не подбирается' };
+    if (/мастер/.test(s)) return { id: 'sw1', why: 'мастер-выключатель — обычный одноклавишный выключатель' };
+    if (/светорегул|поворотн/.test(s)) return { id: 'dim', why: 'поворотно-нажимной светорегулятор 600 Вт' };
+    // выключатель с самовозвратом: выключатель с диммированием, клавишный / звонковый диммер, звонковый выключатель, кнопка
+    if (/диммер|диммирован|звонк|звонов|кнопк|самовозв|импульс/.test(s)) return { id: two ? 'push2' : 'push1', why: 'выключатель с самовозвратом (кнопка)' };
     if (/жалюзи|штор/.test(s) && /выключ|переключ/.test(s)) return { id: 'blind' };
     if (/карточ/.test(s)) return { id: 'card' };
     if (/перекрест/.test(s)) return { id: two ? 'cross2' : 'cross1' };
     if (/проходн/.test(s)) return { id: (two ? 'pass2' : 'pass1') + (led ? '_led' : '') };
-    if (/кнопк|самовозв|звон/.test(s)) return { id: two ? 'push2' : 'push1' };
     if (/выключ/.test(s)) return { id: three ? 'sw3' : (two ? 'sw2' : 'sw1') + (led ? '_led' : '') };
     if (/hdmi/.test(s)) return { id: 'hdmi' };
     if (/акуст/.test(s)) return { id: 'audio' };
     if (/(tv|тв|телевиз)/.test(s) && /rj|интернет|компьют/.test(s)) return { id: 'tv_rj' };
     if (/tv|тв\b|телевиз|sat/.test(s)) return { id: 'tv' };
-    if (/rj|интернет|компьют|лвс|сетев/.test(s)) return { id: /двойн|2\s*x|x\s*2|rj45\s*\+\s*rj45/.test(s) ? 'rj45x2' : 'rj45' };
+    if (/rj|интернет|компьют|лвс|сетев|\bint\b|^int/.test(s)) return { id: /двойн|2\s*x|x\s*2|rj45\s*\+\s*rj45/.test(s) ? 'rj45x2' : 'rj45' };
     if (/usb/.test(s)) return { id: /type[\s-]*c|\+\s*c|a\s*\+\s*c/.test(s) ? 'sock_usb_ac' : 'sock_usb_ac', why: /a\s*\+\s*a/.test(s) ? '' : 'USB A+C (есть и A+A — VLS0404)' };
     if (/ip\s*4[4-9]|влаго|крышк/.test(s)) return { id: 'sock_lid', why: 'розетка с крышкой IP40; если по проекту нужна IP44 — добавьте кожух VLS0806 или подберите влагозащищённую розетку' };
     if (/розетк/.test(s)) return { id: 'sock_sh' };
@@ -33,7 +35,7 @@
     if (/вывод.*кабел/.test(s)) return { id: 'cable' };
     return { id: null, why: 'не распознано — выберите изделие вручную' };
   }
-  const TYPE_RX = /(Выключател|Переключател|Мастер|Розетк|Терморегул|Датчик|Вывод для кабел|Кнопк|Звонок|Диммер|Светорегул|USB|HDMI|ТВ|TV|Интернет|RJ|Телефон|Компьют|Телевиз|Заглушк|Подсветк)/i;
+  const TYPE_RX = /(Выключател|Переключател|Мастер|Розетк|Рамк|Вентилятор|INT\b|Терморегул|Датчик|Вывод для кабел|Кнопк|Звонок|Диммер|Светорегул|USB|HDMI|ТВ|TV|Интернет|RJ|Телефон|Компьют|Телевиз|Заглушк|Подсветк)/i;
   /** Разбор текста: строки «тип … количество»; строка-заголовок без количества (или «Кухня:») — помещение. */
   function parseText(text) {
     const res = []; let room = 'Весь объект';
@@ -60,6 +62,7 @@
       <label class="b ghost" style="cursor:pointer">PDF дизайн-проекта…<input type="file" id="vPdf" accept=".pdf" hidden></label>
       <label>Страница <input id="vPage" type="number" min="1" style="width:70px" placeholder="авто"></label>
       <button class="b ghost" id="vRead">Прочитать страницу</button>
+      <button class="b ghost" onclick="showTab('drw')" title="Найти значки на плане розеток: количество по помещениям и рамки по постам">По значкам на плане →</button>
       <span class="mute" id="vPdfMsg">Ищется лист «Экспликация механизмов» / «План розеток и выключателей». Читается текст страницы: тип механизма и количество.</span>
     </div>
     <label style="margin-top:8px">Или вставьте текст (по помещениям: «Кухня: Розетка 220V 6; Выключатель 1-кл. 2» — каждая строка или через «;»)
@@ -69,6 +72,7 @@
   <div class="card"><h3>2. Помещения и изделия</h3>
     <p class="mute" style="margin-top:0">В экспликации проекта обычно итог по этажу или дому — он попадает в «Весь объект». Чтобы получить КП по помещениям, поменяйте помещение в строке или разделите строку (кнопка ⇆).</p>
     <div class="scroll" style="max-height:none"><table class="t" id="vTab"></table></div>
+    <div id="vFrames" style="margin-top:8px"></div>
   </div>
   <div class="card"><h3>3. Серия, цвет, рамки</h3>
     <div class="grid g4">
@@ -112,7 +116,14 @@
     $('#vTab').querySelectorAll('[data-del]').forEach(b => b.onclick = () => { rows.splice(+b.dataset.del, 1); drawRows(); });
     $('#vTab').querySelectorAll('[data-split]').forEach(b => b.onclick = () => { const r = rows[+b.dataset.split], h2 = Math.floor(r.qty / 2); if (r.qty < 2) return; r.qty -= h2; rows.splice(+b.dataset.split + 1, 0, Object.assign({}, r, { qty: h2, room: 'Помещение' })); drawRows(); });
   }
-  function setRows(list) { rows = list.map(r => { const m = mapType(r.type); return { room: r.room, type: r.type, qty: r.qty, id: m.id || '', why: m.why || '' }; }); drawRows(); }
+  function setRows(list, frames) { rows = list.map(r => { const m = mapType(r.type); return { room: r.room, type: r.type, qty: r.qty, id: r.id !== undefined && r.id !== null && r.id !== '' ? r.id : (m.id || ''), why: r.id ? '' : (m.why || '') }; }); framesBy = frames || {}; drawRows(); drawFrames(); }
+  function drawFrames() {
+    const rs = Object.keys(framesBy).filter(r => framesBy[r]);
+    if (!rs.length) { $('#vFrames').innerHTML = ''; return; }
+    $('#vFrames').innerHTML = '<b>Рамки по чертежу</b> <span class="mute">(значки вплотную — одна рамка; можно поправить)</span><table class="t"><tr><th>Помещение</th><th>1 пост</th><th>2 поста</th><th>3 поста</th><th>4 поста</th><th>5 постов</th></tr>' +
+      rs.map(r => `<tr><td>${esc(r)}</td>${[1, 2, 3, 4, 5].map(k => `<td><input type="number" min="0" data-fr="${esc(r)}|${k}" value="${framesBy[r][k] || 0}" style="width:56px"></td>`).join('')}</tr>`).join('') + '</table>';
+    $('#vFrames').querySelectorAll('[data-fr]').forEach(x => x.onchange = () => { const [r, k] = x.dataset.fr.split('|'); framesBy[r][k] = Math.max(0, +x.value || 0); });
+  }
   // PDF
   let pdfFile = null;
   $('#vPdf').onchange = e => { pdfFile = e.target.files[0]; $('#vPdfMsg').textContent = pdfFile ? `${pdfFile.name} — нажмите «Прочитать страницу» (или укажите номер листа).` : ''; if (pdfFile) $('#vRead').click(); };
@@ -168,11 +179,18 @@
     // рамки
     const F = V.frames[frK];
     for (const [room, posts] of rooms) {
+      const fb = framesBy[room];
+      if (fb && [1, 2, 3, 4, 5].some(k => fb[k] > 0)) {   // рамки по чертежу
+        const used = [1, 2, 3, 4, 5].reduce((t, k) => t + k * (fb[k] || 0), 0);
+        for (const k of [1, 2, 3, 4, 5]) { if (!(fb[k] > 0)) continue; const c = F.avail[k].includes(frCol) ? frCol : F.avail[k][0]; add(room, F.base + k + c, `${F.n} на ${k} пост${k === 1 ? '' : k === 5 ? 'ов' : 'а'}, ${COLN(c)}`, fb[k], 'по чертежу'); }
+        if (used !== posts) warn.push(`${room}: постов в рамках ${used}, изделий ${posts} — проверьте рамки`);
+        continue;
+      }
       let left = posts;
       if (blk >= 2) { const nb = Math.floor(posts / blk); if (nb && F.avail[blk].includes(frCol)) { add(room, F.base + blk + frCol, `${F.n} на ${blk} поста, ${COLN(frCol)}`, nb, `${blk}-постовые блоки`); left -= nb * blk; } }
       if (left > 0 && F.avail['1'].includes(frCol)) add(room, F.base + '1' + frCol, `${F.n} на 1 пост, ${COLN(frCol)}`, left, 'одиночные');
     }
-    if (rooms.size) warn.push('Группировка рамок условная: на сколько постов каждая рамка — по развёрткам стен проекта; поправьте количество 1/2/3-постовых рамок в КП.');
+    if (rooms.size && [...rooms.keys()].some(r => !framesBy[r])) warn.push('Группировка рамок условная: на сколько постов каждая рамка — по развёрткам стен проекта; поправьте количество 1/2/3-постовых рамок в КП.');
     return { res, warn, rooms };
   }
   $('#vGo').onclick = () => {
@@ -209,5 +227,5 @@
     MT.addItems(L.map(x => Object.assign(x, { g: 'Voltum', c: 'ЭУИ', p: 0 })));
     const k = MTUI.kp.get(); if (k.rows.some(r => /^VL/.test(r.a))) MTUI.kp.set(k.rows, k.title);
   }).catch(e => { el.innerHTML = '<div class="card">Каталог Voltum не загрузился: ' + esc(e.message) + '</div>'; });
-  window.VOLTUM = { parseText, mapType, get rows() { return rows; }, setRows, build: () => build() };
+  window.VOLTUM = { parseText, mapType, get rows() { return rows; }, get catalog() { return V; }, get frames() { return framesBy; }, setRows, build: () => build() };
 })();
