@@ -42,6 +42,7 @@
 
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="js/config.js"></script>
+<script src="js/agent-def.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/ui.js"></script>
 <script type="module" src="js/viz3d.js"></script>
@@ -244,9 +245,74 @@
     if (!r.ok || j.error) throw new Error((j.error && (j.error.message || j.error.type)) || ('HTTP ' + r.status));
     return j;
   }
+  /* ---------- Режим «артефакт Claude»: запросы идут через аккаунт Claude того, кто открыл страницу ---------- */
+  let SAMPLE = null, SLIM = null, cturns = [];
+  const CKEY = 'maytoni_chat_claude_v1';
+  const claudeReady = (async () => {
+    if (!(window.claude && window.claude.use)) return null;
+    try { SAMPLE = await window.claude.use('sample'); if (SAMPLE) SLIM = await SAMPLE.limits().catch(() => null); } catch (e) { SAMPLE = null; }
+    return SAMPLE;
+  })();
+  const RULES = () => (window.MT_AGENT ? MT_AGENT.SYSTEM : '') + '\n\n## Как ты работаешь здесь\nТы встроен в страницу комплектатора; функции страницы доступны тебе как инструменты (каталог, расчёт, аналоги, 3D, КП). Вложения: изображения приходят картинками, PDF — картинками первых страниц и текстовым слоем, таблицы — текстом. Отвечай на русском, коротко, таблицы — в Markdown.';
+  async function pdfForSample(file, maxImg) {
+    if (!window.pdfjsLib) await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'vendor/pdf.min.js'; sc.onload = ok; sc.onerror = no; document.head.appendChild(sc); });
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise, blobs = [];
+    let text = '';
+    for (let p = 1; p <= pdf.numPages && p <= 40; p++) { const pg = await pdf.getPage(p); text += `\n--- стр. ${p} ---\n` + (await pg.getTextContent()).items.map(i => i.str).join(' '); }
+    for (let p = 1; p <= Math.min(pdf.numPages, maxImg); p++) {
+      const pg = await pdf.getPage(p), v0 = pg.getViewport({ scale: 1 }), vp = pg.getViewport({ scale: Math.min(2.5, 1600 / Math.max(v0.width, v0.height)) });
+      const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      blobs.push(await new Promise(r => c.toBlob(r, 'image/jpeg', 0.8)));
+    }
+    return { blobs, text: `Вложение: ${file.name} (PDF, ${pdf.numPages} стр.; первые ${blobs.length} — картинками)\nТекстовый слой:${text.slice(0, 40000)}` };
+  }
+  const ERR = { rate_limited: 'Достигнут лимит запросов вашего аккаунта Claude — попробуйте позже.', not_granted: 'Доступ страницы к Claude не разрешён. Обновите страницу и нажмите «Разрешить».',
+    sampling_disabled: 'Claude недоступен для этого аккаунта.', session_expired: 'Войдите в Claude заново.', prompt_too_large: 'Слишком большой объём: начните новый диалог или пришлите меньше файлов.',
+    image_rejected: 'Изображение не принято — попробуйте другой файл.', refused: 'Claude отказался отвечать на этот запрос — переформулируйте.', upstream_error: 'Связь с Claude прервалась — отправьте ещё раз.' };
+  async function sendClaude(text) {
+    busy = true; $('#send').disabled = true;
+    const maxImg = SLIM && SLIM.images ? SLIM.images.maxCount : 0, images = [], parts = [];
+    try {
+      for (const f of atts) {
+        const low = f.name.toLowerCase();
+        if (f.type.startsWith('image/')) { if (images.length < maxImg) { images.push(f); parts.push(`[изображение: ${f.name}]`); } else parts.push(`[изображение ${f.name} не отправлено: лимит картинок]`); }
+        else if (low.endsWith('.pdf')) { const r = await pdfForSample(f, Math.max(0, maxImg - images.length)); images.push(...r.blobs); parts.push(r.text); }
+        else parts.push((await toBlocks(f)).filter(b => b.type === 'text').map(b => b.text).join('\n'));
+      }
+    } catch (e) { add('a', esc(e.message)); busy = false; $('#send').disabled = false; return; }
+    add('u', esc(text || '') + (atts.length ? `<div class="att">📎 ${atts.map(a => esc(a.name)).join(', ')}</div>` : ''));
+    $('#inp').value = ''; const sentAtts = atts; atts = []; drawAtts();
+    cturns.push({ role: 'user', content: (parts.length ? parts.join('\n\n') + '\n\n' : '') + (text || 'Посмотри вложения.') });
+    let turns = cturns.slice(); while (JSON.stringify(turns).length > 200000 && turns.length > 1) turns.shift();
+    while (turns.length && turns[0].role !== 'user') turns.shift();
+    let maxT = SLIM && SLIM.tools ? SLIM.tools.maxCount : 0;
+    const defs = (window.MT_AGENT ? MT_AGENT.TOOLS : []).slice(0, maxT || 0);
+    const tools = defs.map(d => ({ name: d.name, description: d.description.slice(0, 1000), inputSchema: d.input_schema,
+      execute: input => { add('tool', '⚙ ' + esc(TOOL_LABEL[d.name] || d.name)); const out = TOOLS[d.name](input || {}); let r = JSON.stringify(out); if (r.length > 30000) r = r.slice(0, 30000) + '…'; return r; } }));
+    let bubble = null; const wait = add('a', '<span class="typing"><i></i><i></i><i></i></span>', false);
+    $('#status').textContent = 'думаю…';
+    try {
+      const opts = { cache: false, onText: ({ text: t }) => { wait.remove(); if (!bubble) bubble = add('a', '', false); bubble.innerHTML = md(t); $('#msgs').scrollTop = 1e9; } };
+      if (tools.length) opts.tools = tools; if (images.length) opts.images = images;
+      const res = await SAMPLE([{ role: 'user', content: RULES() }, ...turns], opts);
+      cturns.push({ role: 'assistant', content: res.text });
+      if (bubble) { log.push(['a', bubble.innerHTML]); } else add('a', md(res.text));
+      if (res.truncated) add('tool', 'Ответ обрезан по длине — попросите продолжить.');
+    } catch (e) {
+      wait.remove();
+      if (e && e.text && bubble) { bubble.innerHTML = md(e.text); log.push(['a', bubble.innerHTML]); cturns.push({ role: 'assistant', content: e.text }); }
+      else { cturns.pop(); if (text && !$('#inp').value) $('#inp').value = text; atts = sentAtts; drawAtts(); }
+      if (!e || e.code !== 'cancelled') add('a', '⚠ ' + esc(ERR[e && e.code] || ('Ошибка: ' + ((e && (e.message || e.code)) || e))));
+    }
+    wait.remove(); try { localStorage.setItem(CKEY, JSON.stringify({ cturns, log: log.slice(-200) })); } catch (e) { }
+    busy = false; $('#send').disabled = false; $('#status').textContent = '';
+  }
+
   async function send() {
     const text = $('#inp').value.trim(); if (busy || (!text && !atts.length)) return;
-    if (!API) { add('a', md('На этом адресе ассистент не подключён к нейросети — откройте версию сайта на Vercel. Пока можно пользоваться страницей [Инструменты](tools.html): каталог, светорасчёт, аналоги, проверка КП.')); return; }
+    if (await claudeReady) return sendClaude(text);
+    if (!API) { add('a', md('На этом адресе ассистент не подключён к нейросети — откройте его как артефакт Claude или версию сайта на Vercel. Пока можно пользоваться страницей [Инструменты](tools.html): каталог, светорасчёт, аналоги, проверка КП.')); return; }
     busy = true; $('#send').disabled = true;
     const content = [];
     try { for (const f of atts) content.push(...await toBlocks(f)); } catch (e) { add('a', esc(e.message)); busy = false; $('#send').disabled = false; return; }
@@ -284,18 +350,21 @@
   }
   $('#send').onclick = send;
   $('#inp').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
-  $('#newChat').onclick = () => { history = []; log = []; persist(); $('#msgs').innerHTML = ''; welcome(); };
+  $('#newChat').onclick = () => { history = []; cturns = []; log = []; persist(); try { localStorage.removeItem(CKEY); } catch (e) { } $('#msgs').innerHTML = ''; welcome(); };
 
   /* ---------- Старт ---------- */
   MTUI.renderKP($('#kpBox'), { compact: true });
   const t = () => $('#kpTitle').textContent = kp.get().title || 'КП'; kp.on(t); t();
   $('#v3dClose').onclick = () => { if (view3d) view3d.dispose(); view3d = null; $('#v3d').innerHTML = ''; $('#v3dCard').hidden = true; };
-  $('#kpX').onclick = () => kp.exportXlsx(); $('#kpClr').onclick = () => { if (confirm('Очистить КП?')) kp.clear(); };
+  $('#kpX').onclick = () => kp.exportXlsx(); $('#kpClr').onclick = e => { const b = e.target; if (b.dataset.sure) { kp.clear(); b.textContent = 'Очистить'; delete b.dataset.sure; } else { b.dataset.sure = 1; b.textContent = 'Точно очистить?'; setTimeout(() => { b.textContent = 'Очистить'; delete b.dataset.sure; }, 3000); } };
   try { const s = JSON.parse(localStorage.getItem(HKEY)); if (s && s.history && s.history.length) { history = s.history; log = s.log || []; } } catch (e) { }
   welcome(); for (const [k, h] of log) add(k, h, false);
   $('#status').textContent = 'загружаю каталог…';
   await MT.loadCatalog('data/catalog.json'); $('#status').textContent = '';
-  if (!API) $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">На этом адресе ассистент не подключён к нейросети: он работает в версии сайта на Vercel (или укажите адрес прокси в <code>js/config.js</code>). Страница <a href="tools.html">Инструменты</a> работает здесь полностью.</div>';
+  if (await claudeReady) {
+    try { const c = JSON.parse(localStorage.getItem(CKEY)); if (c && c.cturns) { cturns = c.cturns; if (!log.length) { log = c.log || []; for (const [k, h] of log) add(k, h, false); } } } catch (e) { }
+    $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">Ассистент работает через ваш аккаунт Claude: при первом сообщении Claude спросит разрешение.</div>';
+  } else if (!API) $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">На этом адресе ассистент не подключён к нейросети: он работает в версии сайта на Vercel (или укажите адрес прокси в <code>js/config.js</code>). Страница <a href="tools.html">Инструменты</a> работает здесь полностью.</div>';
   else fetch(API + '/health').then(r => r.json()).then(j => { if (!j.key) $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">В прокси не задан ключ Claude API.</div>'; })
     .catch(() => { $('#banner').innerHTML = '<div class="note" style="margin-bottom:12px">Прокси недоступен (на Vercel проверьте, что проект развёрнут). Пока работает страница <a href="tools.html">Инструменты</a>.</div>'; });
 })();

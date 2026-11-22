@@ -122,7 +122,7 @@
       <div class="row" style="margin-bottom:10px"><input id="kpTitle" style="flex:1;min-width:200px" placeholder="Название КП">
         <button class="b" id="kpX">Скачать xlsx</button>
         <label class="b ghost" style="display:inline-flex;flex-direction:row;cursor:pointer;color:var(--ink)">Загрузить xlsx<input type="file" id="kpFile" accept=".xlsx,.xls,.csv" hidden></label>
-        <button class="b ghost" id="kpAdd">+ строка</button><button class="b ghost" id="kpClr">Очистить</button></div>
+        <input id="kpNew" placeholder="артикул" style="width:140px"><button class="b ghost" id="kpAdd">+ строка</button><button class="b ghost" id="kpClr">Очистить</button></div>
       <div id="kpBox"></div>
     </div>
   </section>
@@ -326,8 +326,8 @@
   const syncTitle = () => $('#kpTitle').value = kp.get().title || ''; kp.on(syncTitle); syncTitle();
   $('#kpTitle').onchange = () => { kp.get().title = $('#kpTitle').value; kp.set(kp.get().rows, $('#kpTitle').value); };
   $('#kpX').onclick = () => kp.exportXlsx();
-  $('#kpAdd').onclick = () => { const a = prompt('Артикул'); if (a) kp.add([{ a, qty: 1, room: '' }]); };
-  $('#kpClr').onclick = () => { if (confirm('Очистить КП?')) kp.clear(); };
+  $('#kpAdd').onclick = () => { const a = $('#kpNew').value.trim(); if (a) { kp.add([{ a, qty: 1, room: '' }]); $('#kpNew').value = ''; } else $('#kpNew').focus(); };
+  $('#kpClr').onclick = e => { const b = e.target; if (b.dataset.sure) { kp.clear(); b.textContent = 'Очистить'; delete b.dataset.sure; } else { b.dataset.sure = 1; b.textContent = 'Точно очистить?'; setTimeout(() => { b.textContent = 'Очистить'; delete b.dataset.sure; }, 3000); } };
   $('#kpFile').onchange = async e => { const f = e.target.files[0]; if (!f) return; const rows = await MTUI.readKPFile(f); kp.set(rows, f.name.replace(/\.\w+$/, '')); };
 })();
 </script>

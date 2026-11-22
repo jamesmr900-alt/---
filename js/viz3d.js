@@ -172,7 +172,8 @@ export function render(el, scene) {
     if (v === 'persp') { cam.position.set(W * 0.7, H + D * 1.1, L * 1.2); ctl.target.set(0, H * 0.35, 0); }
     if (v === 'in') { cam.position.set(-W / 2 + 0.4, 1.6, L / 2 - 0.4); ctl.target.set(W / 4, 1.0, -L / 4); }
     if (v === 'full') { if (document.fullscreenElement) document.exitFullscreen(); else wrap.requestFullscreen && wrap.requestFullscreen(); }
-    if (v === 'png') { renderer.render(s, cam); const a = document.createElement('a'); a.href = renderer.domElement.toDataURL('image/png'); a.download = (scene.title || 'визуализация') + '.png'; a.click(); }
+    if (v === 'png') { renderer.render(s, cam); const fn = (scene.title || 'визуализация') + '.png';
+      renderer.domElement.toBlob(async blob => { if (window.MTUI && await window.MTUI.saveFile(fn, blob)) return; const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn; a.click(); }, 'image/png'); }
   });
 
   let alive = true;

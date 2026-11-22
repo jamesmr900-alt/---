@@ -6,6 +6,17 @@
   const rub = v => v ? Math.round(v).toLocaleString('ru-RU') + ' ₽' : '—';
   const n1 = v => (Math.round(v * 10) / 10).toLocaleString('ru-RU');
 
+  /* ---------- Сохранение файлов: внутри Claude — через окно подтверждения, иначе обычная загрузка ---------- */
+  let DL;
+  const dlReady = (async () => { try { if (window.claude && window.claude.use) DL = await window.claude.use('downloads'); } catch (e) { DL = null; } return DL; })();
+  /** true — файл обработан Claude (сохранён или посетитель отказался); false — сохранять обычным способом. */
+  async function saveFile(filename, blob) {
+    if (!(window.claude && window.claude.use)) return false;
+    const d = await dlReady; if (!d) return false;
+    try { await d.save({ filename, data: blob }); } catch (e) { if (e && e.code !== 'declined') console.warn('save', e); }
+    return true;
+  }
+
   /* ---------- КП: общее для обеих страниц хранилище ---------- */
   const KEY = 'maytoni_kp_v1';
   const subs = [];
@@ -21,7 +32,11 @@
     clear() { KP = { title: 'КП', rows: [] }; kpSave(); },
     on(f) { subs.push(f); },
     priced: () => MT.priceKP(KP.rows),
-    exportXlsx(name) { const wb = MT.kpToXlsx(XLSX, KP.rows, KP.title); XLSX.writeFile(wb, (name || KP.title || 'КП').replace(/[\\/:*?"<>|]/g, '_') + '.xlsx'); },
+    async exportXlsx(name) {
+      const wb = MT.kpToXlsx(XLSX, KP.rows, KP.title), fn = (name || KP.title || 'КП').replace(/[\\/:*?"<>|]/g, '_') + '.xlsx';
+      if (await saveFile(fn, new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })]))) return;
+      XLSX.writeFile(wb, fn);
+    },
   };
   window.addEventListener('storage', e => { if (e.key === KEY) { KP = kpLoad(); subs.forEach(f => f(KP)); } });
 
@@ -129,5 +144,5 @@
     return MT.kpFromSheet(XLSX, wb);
   }
 
-  window.MTUI = { $, esc, rub, n1, kp, renderKP, roomCalc, drawMap, calcHTML, readKPFile };
+  window.MTUI = { saveFile, $, esc, rub, n1, kp, renderKP, roomCalc, drawMap, calcHTML, readKPFile };
 })();
