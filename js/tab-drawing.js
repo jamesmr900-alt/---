@@ -8,7 +8,7 @@
   const el = document.querySelector('section[data-p="drw"]'); if (!el) return;
   const SC = 3;   // масштаб рендера листа: 3 px на pt (тонкие линии значков различимы)
   const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#9a6324', '#469990', '#800000', '#808000', '#000075', '#bfef45', '#fabed4'];
-  const st = { doc: null, page: 0, cv: null, ink: null, items: [], mode: 'eui', samples: [], dets: [], rooms: [], zones: null, walls: null, region: null, view: { s: 0.4, x: 0, y: 0 }, tool: 'pan', selSample: 0, selRoom: 0, manual: {}, frameMan: {}, titles: [] };
+  const st = { doc: null, page: 0, cv: null, ink: null, items: [], mode: 'eui', samples: [], dets: [], rooms: [], draft: null, hover: null, zones: null, walls: null, region: null, view: { s: 0.4, x: 0, y: 0 }, tool: 'pan', selSample: 0, selRoom: 0, manual: {}, frameMan: {}, titles: [] };
   el.innerHTML = `
   <div class="card"><h3>1. Лист проекта</h3>
     <div class="row">
@@ -26,6 +26,8 @@
       <button class="b ghost sm" data-tool="add" title="Щелчок — добавить значок выбранного образца (если не нашёлся)">＋ значок</button>
       <button class="b ghost sm" data-tool="del" title="Щелчок по найденному значку — удалить (ложное срабатывание)">✕ значок</button>
       <button class="b ghost sm" data-tool="room" title="Щелчок — поставить метку выбранного помещения">⌖ помещение</button>
+      <button class="b ghost sm" data-tool="poly" title="Границы выбранного помещения замкнутой линией: щелчки по углам, замкнуть — щелчок по первой точке, двойной щелчок или Enter; Esc — отмена. Всё внутри относится к этому помещению, у соседних эта часть вычитается">▱ границы линией</button>
+      <button class="b ghost sm" data-tool="rbox" title="Границы выбранного помещения прямоугольной областью">▭ границы областью</button>
       <button class="b ghost sm" data-tool="region" title="Рамка — где искать (по умолчанию весь план без штампа и таблиц)">◫ область</button>
       <span style="flex:1"></span>
       <label style="flex-direction:row;align-items:center;gap:4px">точность <input type="range" id="dThr" min="0.5" max="0.95" step="0.01" value="0.72" style="width:110px;padding:0"><span id="dThrV">0.72</span></label>
@@ -141,22 +143,32 @@
     st.roomSrc = best ? best.n : null;
     rebuildZones(); drawRooms(); draw();
   }
+  /** Точка внутри многоугольника (чёт-нечет). */
+  const inPoly = (P, x, y) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, yi] = P[i], [xj, yj] = P[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+  /** Помещение по точке: сначала границы, нарисованные вручную (последние — главнее), потом автоматические зоны помещений без границ. */
+  function roomAt(x, y) {
+    const pr = st.rooms.map((r, i) => ({ r, i })).filter(o => o.r.poly && o.r.poly.length > 2).sort((a, b) => (b.r.polyT || 0) - (a.r.polyT || 0));
+    for (const o of pr) if (inPoly(o.r.poly, x, y)) return o.i;
+    const z = st.zones ? st.zones.at(x, y) : -1; return z >= 0 ? st.zones.map[z] : -1;
+  }
   function rebuildZones() {
-    const placed = st.rooms.filter(r => r.x != null);
-    if (!placed.length || !st.cv) { st.zones = null; return; }
+    const placed = st.rooms.filter(r => r.x != null && !(r.poly && r.poly.length > 2));
+    if (!placed.length || !st.cv) { st.zones = null; assignRooms(); return; }
     st.walls = st.walls || SYM.walls(st.cv, 4);
     st.zones = SYM.zones(st.walls, placed); st.zones.map = placed.map(r => st.rooms.indexOf(r));
     assignRooms();
   }
-  function assignRooms() { st.dets.forEach(d => { const z = st.zones ? st.zones.at(d.x + d.w / 2, d.y + d.h / 2) : -1; d.room = z >= 0 ? st.zones.map[z] : -1; }); }
+  function assignRooms() { st.dets.forEach(d => { d.room = roomAt(d.x + d.w / 2, d.y + d.h / 2); }); }
   function drawRooms() {
     const b = $('#dRooms');
     if (!st.rooms.length) { b.innerHTML = 'Помещения не найдены. Добавьте вручную и поставьте метки на план (инструмент «помещение»). Без помещений всё попадёт в «Весь объект».'; return; }
     b.innerHTML = (st.roomSrc && st.roomSrc !== st.page ? `<div style="margin-bottom:4px">Номера и названия — с листа ${st.roomSrc}. Проверьте, что метки стоят в своих помещениях.</div>` : '') +
       st.rooms.map((r, i) => `<div class="row" style="gap:4px;margin:2px 0;${i === st.selRoom ? 'background:#fff6e0;border-radius:6px' : ''}"><input type="radio" name="dSelRoom" data-sr="${i}" ${i === st.selRoom ? 'checked' : ''} style="width:auto">
-        <input data-rn="${i}" value="${esc(r.name)}" style="width:150px;font-size:12px"><span style="width:44px">${r.S ? r.S + ' м²' : ''}</span><span title="${r.x != null ? 'метка на плане' : 'нет метки — выберите и щёлкните на плане инструментом «помещение»'}">${r.x != null ? '⌖' : '⚠'}</span><button class="b ghost sm" data-rd="${i}">✕</button></div>`).join('');
-    b.querySelectorAll('[data-sr]').forEach(x => x.onchange = () => { st.selRoom = +x.dataset.sr; setTool('room'); drawRooms(); });
+        <input data-rn="${i}" value="${esc(r.name)}" style="width:150px;font-size:12px"><span style="width:44px">${r.S ? r.S + ' м²' : ''}</span><span title="${r.poly ? 'границы нарисованы вручную' : r.x != null ? 'метка на плане' : 'нет метки — выберите и щёлкните на плане инструментом «помещение» или нарисуйте границы'}">${r.poly ? '▱' : r.x != null ? '⌖' : '⚠'}</span>${r.poly ? `<button class="b ghost sm" data-rpc="${i}" title="Убрать границы — помещение снова по метке">▱✕</button>` : ''}<button class="b ghost sm" data-rd="${i}">✕</button></div>`).join('') +
+      '<div style="margin-top:4px">Значки уходят не в то помещение? Выберите помещение и обведите его инструментом «▱ границы линией» или «▭ границы областью».</div>';
+    b.querySelectorAll('[data-sr]').forEach(x => x.onchange = () => { st.selRoom = +x.dataset.sr; if (!['poly', 'rbox'].includes(st.tool)) setTool('room'); drawRooms(); draw(); });
     b.querySelectorAll('[data-rn]').forEach(x => x.onchange = () => { st.rooms[+x.dataset.rn].name = x.value; results(); draw(); });
+    b.querySelectorAll('[data-rpc]').forEach(x => x.onclick = () => { const r = st.rooms[+x.dataset.rpc]; delete r.poly; delete r.polyT; if (r._auto) { r.x = r.y = null; delete r._auto; } rebuildZones(); drawRooms(); drawGroups(); results(); draw(); });
     b.querySelectorAll('[data-rd]').forEach(x => x.onclick = () => { st.rooms.splice(+x.dataset.rd, 1); st.selRoom = 0; rebuildZones(); drawRooms(); results(); draw(); });
   }
   $('#dRoomAdd').onclick = () => { st.rooms.push({ name: 'Помещение ' + (st.rooms.length + 1), S: null, x: null, y: null }); st.selRoom = st.rooms.length - 1; setTool('room'); drawRooms(); };
@@ -259,6 +271,13 @@
     for (const cl of frameClusters()) { if (cl.length < 2) continue; const ds = cl.map(i => st.dets[i]); const x0 = Math.min(...ds.map(d => d.x)), y0 = Math.min(...ds.map(d => d.y)), x1 = Math.max(...ds.map(d => d.x + d.w)), y1 = Math.max(...ds.map(d => d.y + d.h));
       ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = lw; ctx.strokeRect(x0 - 3, y0 - 3, x1 - x0 + 6, y1 - y0 + 6); ctx.fillStyle = '#000'; ctx.font = `${11 / st.view.s}px system-ui`; ctx.fillText(cl.length + ' п.', x1 + 4, y0 + 10 / st.view.s); }
     for (const d of st.dets) { const s = st.samples[d.ti]; if (!s || !s.on || d.off) continue; ctx.strokeStyle = s.color; ctx.lineWidth = lw * 1.6; ctx.strokeRect(d.x, d.y, d.w, d.h); if (d.manual) { ctx.fillStyle = s.color; ctx.fillRect(d.x, d.y - 4 / st.view.s, 4 / st.view.s, 4 / st.view.s); } }
+    // границы помещений, нарисованные вручную
+    st.rooms.forEach((rm, i) => { if (!rm.poly || rm.poly.length < 3) return; const sel = i === st.selRoom;
+      ctx.beginPath(); rm.poly.forEach(([px, py], k) => k ? ctx.lineTo(px, py) : ctx.moveTo(px, py)); ctx.closePath();
+      ctx.fillStyle = sel ? 'rgba(230,126,34,.14)' : 'rgba(44,62,80,.07)'; ctx.fill(); ctx.strokeStyle = sel ? '#e67e22' : '#2c3e50'; ctx.lineWidth = lw * (sel ? 2.2 : 1.4); ctx.stroke(); });
+    if (st.draft && st.draft.length) { ctx.beginPath(); st.draft.forEach(([px, py], k) => k ? ctx.lineTo(px, py) : ctx.moveTo(px, py)); if (st.hover) ctx.lineTo(st.hover[0], st.hover[1]);
+      ctx.strokeStyle = '#e67e22'; ctx.lineWidth = lw * 2; ctx.setLineDash([6 / st.view.s, 4 / st.view.s]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#e67e22'; st.draft.forEach(([px, py], k) => { ctx.beginPath(); ctx.arc(px, py, (k ? 3 : 6) / st.view.s, 0, 7); ctx.fill(); }); }
     // зоны помещений: цветная точка у значка
     st.rooms.forEach((rm, i) => { if (rm.x == null) return; ctx.fillStyle = i === st.selRoom ? '#e67e22' : '#2c3e50'; ctx.beginPath(); ctx.arc(rm.x, rm.y, 7 / st.view.s, 0, 7); ctx.fill();
       ctx.font = `bold ${13 / st.view.s}px system-ui`; ctx.lineWidth = 3 / st.view.s; ctx.strokeStyle = '#fff'; ctx.strokeText(rm.name, rm.x + 10 / st.view.s, rm.y + 4 / st.view.s); ctx.fillText(rm.name, rm.x + 10 / st.view.s, rm.y + 4 / st.view.s); });
@@ -266,16 +285,17 @@
     if (drag && drag.rect) { ctx.strokeStyle = '#e67e22'; ctx.lineWidth = lw; ctx.strokeRect(drag.rect.x, drag.rect.y, drag.rect.w, drag.rect.h); }
     ctx.restore();
   }
-  function setTool(t) { st.tool = t; el.querySelectorAll('[data-tool]').forEach(b => b.className = 'b sm' + (b.dataset.tool === t ? '' : ' ghost')); cv.style.cursor = t === 'pan' ? 'grab' : 'crosshair'; }
+  function setTool(t) { if (t !== 'poly') st.draft = null; st.tool = t; el.querySelectorAll('[data-tool]').forEach(b => b.className = 'b sm' + (b.dataset.tool === t ? '' : ' ghost')); cv.style.cursor = t === 'pan' ? 'grab' : 'crosshair'; }
   el.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
   let drag = null;
   cv.addEventListener('wheel', e => { if (!st.cv) return; e.preventDefault(); const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, k = e.deltaY < 0 ? 1.2 : 1 / 1.2;
     st.view.x = mx - (mx - st.view.x) * k; st.view.y = my - (my - st.view.y) * k; st.view.s *= k; draw(); }, { passive: false });
   cv.addEventListener('pointerdown', e => { if (!st.cv) return; const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, [x, y] = toImg(mx, my); cv.setPointerCapture(e.pointerId);
     drag = { mx, my, x, y, vx: st.view.x, vy: st.view.y, moved: false }; });
-  cv.addEventListener('pointermove', e => { if (!drag) return; const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top; if (Math.hypot(mx - drag.mx, my - drag.my) > 3) drag.moved = true;
+  cv.addEventListener('pointermove', e => { if (st.tool === 'poly' && st.draft && !drag) { const r = cv.getBoundingClientRect(); st.hover = toImg(e.clientX - r.left, e.clientY - r.top); draw(); }
+    if (!drag) return; const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top; if (Math.hypot(mx - drag.mx, my - drag.my) > 3) drag.moved = true;
     if (st.tool === 'pan' || e.buttons === 4) { st.view.x = drag.vx + mx - drag.mx; st.view.y = drag.vy + my - drag.my; draw(); return; }
-    if (st.tool === 'sample' || st.tool === 'region') { const [x, y] = toImg(mx, my); drag.rect = { x: Math.min(x, drag.x), y: Math.min(y, drag.y), w: Math.abs(x - drag.x), h: Math.abs(y - drag.y) }; draw(); } });
+    if (st.tool === 'sample' || st.tool === 'region' || st.tool === 'rbox') { const [x, y] = toImg(mx, my); drag.rect = { x: Math.min(x, drag.x), y: Math.min(y, drag.y), w: Math.abs(x - drag.x), h: Math.abs(y - drag.y) }; draw(); } });
   cv.addEventListener('pointerup', e => {
     if (!drag) return; const d = drag; drag = null; const { x, y } = d;
     if (st.tool === 'sample' && d.rect && d.rect.w > 4 && d.rect.h > 4) {
@@ -285,9 +305,27 @@
     } else if (st.tool === 'region' && d.rect && d.rect.w > 20) { st.region = { x0: d.rect.x, y0: d.rect.y, x1: d.rect.x + d.rect.w, y1: d.rect.y + d.rect.h }; setTool('pan'); }
     else if (!d.moved && st.tool === 'add' && st.samples[st.selSample]) { const s = st.samples[st.selSample]; st.dets.push({ x: x - s.w / 2, y: y - s.h / 2, w: s.w, h: s.h, ti: st.selSample, c: 1, manual: true }); assignRooms(); drawSamples(); drawGroups(); results(); }
     else if (!d.moved && st.tool === 'del') { const i = st.dets.findIndex(o => x >= o.x - 3 && x <= o.x + o.w + 3 && y >= o.y - 3 && y <= o.y + o.h + 3); if (i >= 0) { st.dets.splice(i, 1); drawSamples(); drawGroups(); results(); } }
+    else if (st.tool === 'rbox' && d.rect && d.rect.w > 10 && d.rect.h > 10) { const R = d.rect; setPoly([[R.x, R.y], [R.x + R.w, R.y], [R.x + R.w, R.y + R.h], [R.x, R.y + R.h]]); }
+    else if (!d.moved && st.tool === 'poly') {
+      if (!st.rooms[st.selRoom]) { setMsg('Сначала выберите помещение в списке справа (или добавьте «+ помещение»).'); }
+      else { st.draft = st.draft || []; const f = st.draft[0];
+        if (st.draft.length > 2 && Math.hypot(x - f[0], y - f[1]) < 12 / st.view.s) setPoly(st.draft); else st.draft.push([x, y]); }
+    }
     else if (!d.moved && st.tool === 'room' && st.rooms[st.selRoom]) { Object.assign(st.rooms[st.selRoom], { x, y }); rebuildZones(); drawRooms(); results(); }
     draw();
   });
+  cv.addEventListener('dblclick', () => { if (st.tool === 'poly' && st.draft) { const P = st.draft.filter((p, i, a) => !i || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) > 2); if (P.length > 2) setPoly(P); } });
+  document.addEventListener('keydown', e => { if (st.tool !== 'poly' || !st.draft || !el.offsetParent) return;
+    if (e.key === 'Enter' && st.draft.length > 2) { setPoly(st.draft); e.preventDefault(); } else if (e.key === 'Escape') { st.draft = null; draw(); } else if (e.key === 'Backspace') { st.draft.pop(); draw(); e.preventDefault(); } });
+  /** Сохранить границы выбранного помещения: всё внутри — его, у соседних эта часть вычитается. */
+  function setPoly(P) {
+    const r = st.rooms[st.selRoom]; if (!r || P.length < 3) return;
+    r.poly = P.map(p => [Math.round(p[0]), Math.round(p[1])]); r.polyT = Date.now(); st.draft = null; st.hover = null;
+    if (r.x == null || !inPoly(r.poly, r.x, r.y)) { const cx = r.poly.reduce((a, p) => a + p[0], 0) / r.poly.length, cy = r.poly.reduce((a, p) => a + p[1], 0) / r.poly.length; r.x = cx; r.y = cy; r._auto = true; }
+    rebuildZones(); drawRooms(); drawSamples(); drawGroups(); results(); draw();
+    const n = st.dets.filter(d => d.room === st.selRoom && !d.off).length;
+    setMsg(`Границы «${r.name}» сохранены: внутри значков: ${n}. У соседних помещений эта часть вычтена.`);
+  }
   new ResizeObserver(() => draw()).observe(cv);
   /* ---------- результат ---------- */
   function frameClusters() { const L = st.dets.filter(d => !d.off && st.samples[d.ti] && st.samples[d.ti].on && st.samples[d.ti].kind === 'eui' && st.samples[d.ti].vid); return SYM.frames(L).map(cl => cl.map(i => st.dets.indexOf(L[i]))); }
@@ -313,7 +351,7 @@
         let bi = -1, bd = 1e9; cls.forEach((o, oi) => { if (o === c || o.lbl || o.absorbed) return; const gx = Math.max(o.x0 - c.x1, c.x0 - o.x1, 0), gy = Math.max(o.y0 - c.y1, c.y0 - o.y1, 0), alignH = gy === 0 && Math.abs((o.y0 + o.y1) - (c.y0 + c.y1)) < c.sz, alignV = gx === 0 && Math.abs((o.x0 + o.x1) - (c.x0 + c.x1)) < c.sz, dd = Math.max(gx, gy);
           if ((alignH || alignV) && dd < c.sz * 1.2 && o.n + c.n <= c.lbl.n && dd < bd) { bd = dd; bi = oi; } });
         if (bi < 0) break; const o = cls[bi]; o.absorbed = true; c.n += o.n; c.x0 = Math.min(c.x0, o.x0); c.y0 = Math.min(c.y0, o.y0); c.x1 = Math.max(c.x1, o.x1); c.y1 = Math.max(c.y1, o.y1); } });
-      st.frameLbl.forEach((L, li) => { if (!usedL.has(li)) { const z = st.zones ? st.zones.at(L.x, L.y) : -1; add(roomName(z >= 0 ? st.zones.map[z] : -1), L.n); st.frameDiag.push(`подпись Р-0${L.n} без найденных значков рядом`); } });
+      st.frameLbl.forEach((L, li) => { if (!usedL.has(li)) { add(roomName(roomAt(L.x, L.y)), L.n); st.frameDiag.push(`подпись Р-0${L.n} без найденных значков рядом`); } });
     }
     cls.filter(c => !c.absorbed).forEach(c => { const n = c.lbl ? c.lbl.n : c.n; if (c.lbl && c.lbl.n !== c.n) st.frameDiag.push(`${c.room}: рамка Р-0${c.lbl.n}, найдено значков ${c.n}`); add(c.room, n); });
     return f;
@@ -363,5 +401,5 @@
     };
   }
   window.addEventListener('tab-shown', e => { if (e.detail === 'drw') { if (st.cv && !st.view.s) fit(); draw(); } });
-  window.DRAWING = { addSampleRect: (label, r) => { const bb = SYM.cropIcon(st.ink, { x0: r[0], y0: r[1], x1: r[2], y1: r[3] }) || { x: r[0], y: r[1], w: r[2] - r[0], h: r[3] - r[1] }; const s = addSample(label, bb, null); drawSamples(); draw(); return s; }, st, results, autoRooms, frameInfo: () => frameCounts(), counts: () => counts() };
+  window.DRAWING = { setRoomPoly: (i, P) => { st.selRoom = i; setPoly(P); }, roomAt, addSampleRect: (label, r) => { const bb = SYM.cropIcon(st.ink, { x0: r[0], y0: r[1], x1: r[2], y1: r[3] }) || { x: r[0], y: r[1], w: r[2] - r[0], h: r[3] - r[1] }; const s = addSample(label, bb, null); drawSamples(); draw(); return s; }, st, results, autoRooms, frameInfo: () => frameCounts(), counts: () => counts() };
 })();

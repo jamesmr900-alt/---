@@ -31,10 +31,22 @@
     <div class="scroll" style="max-height:none"><table class="t" id="ctTab"></table></div>
     <div class="row" style="margin-top:10px"><button class="b" id="ctGo">Подобрать управление</button></div></div>
   <div id="ctOut"></div>`;
-  let sources = [], rooms = [], ev = null, chosen = 0, eqRows = [], DRV = {};
+  let sources = [], rooms = [], tracks = [], ev = null, chosen = 0, eqRows = [], DRV = {};
   fetch('data/drivers.json?v=' + (window.ASSET_V || '')).then(r => r.ok ? r.json() : {}).then(d => { DRV = d; window.MT_DRIVERS = d; }).catch(() => {});
   const is48 = c => /магнит|48|низковольт/i.test(c || '') || MT.catalog.some(p => MT.kind(p) === 'блок питания' && String(p.comp || '').split(/;\s*/).includes(c) && /48/.test(p.n || ''));
   const FEAT = [['dim', 'яркость'], ['cct', 'оттенок белого'], ['rgb', 'цвет']];
+  const isExility = x => /EXILITY/i.test(x && x.c || '');
+  /** Управляемый аналог светильника Exility / Exility X: та же серия (TR030…), мощность и цвет, с DSZ (ZigBee) или DD2 (DALI) в артикуле. */
+  function ctlAnalog(a, tag) {
+    if (new RegExp('-' + tag + '(-|$)').test(a)) return a;
+    const m = a.match(/^(TR\d{3})-\d+-(\d+)W/); if (!m) return null;
+    const col = (a.match(/-([A-Z]{1,3})$/) || [])[1], zoom = /-Z(-|$)/.test(a);
+    const c = MT.catalog.filter(p => p.a.startsWith(m[1] + '-') && new RegExp('-' + tag + '(-|$)').test(p.a));
+    if (!c.length) return null;
+    const w = p => +((p.a.match(/^TR\d{3}-\d+-(\d+)W/) || [])[1] || 0);
+    c.sort((p, q) => (Math.abs(w(p) - +m[2]) - Math.abs(w(q) - +m[2])) || ((p.a.endsWith('-' + col) ? 0 : 1) - (q.a.endsWith('-' + col) ? 0 : 1)) || ((/-Z(-|$)/.test(p.a) === zoom ? 0 : 1) - (/-Z(-|$)/.test(q.a) === zoom ? 0 : 1)));
+    return c[0].a;
+  }
   function fromRows(rows) {
     const rmap = new Map(), src = new Map();
     for (const r of rows) {
@@ -51,7 +63,8 @@
           if (m === 'MIX') s.features = ['onoff', 'dim', 'cct']; if (m === 'RGB' || m === 'RGBW') s.features = ['onoff', 'dim', 'rgb'];
           s.wpm = x.w || ''; s.voltage = f.volt ? f.volt.lo : 24; if (E.STRIPS[x.a]) s.stripSku = x.a; s._reel = (x.l || 5000) / 1000;
           const ml = String(r.note || '').match(/([\d.]+)\s*м/); s._len = ml ? +ml[1] : 0;
-        } else if (k === 'трековый' || k === 'трековый подвесной') { s.kind = is48(x.c) ? 'track48' : 'track230'; s.unitPower = x.w || ''; }
+        } else if (k === 'трековый' || k === 'трековый подвесной') { s.kind = is48(x.c) ? 'track48' : 'track230'; s.unitPower = x.w || ''; s.system = x.c || '';
+          if (isExility(x)) { s.analogs = { DALI: ctlAnalog(x.a, 'DD2'), ZIGBEE: ctlAnalog(x.a, 'DSZ') }; s.name += ' · ' + (/EXILITY X/i.test(x.c) ? 'Exility X' : 'Exility'); } }
         else if (DRV[x.a] && DRV[x.a].t !== 'CC') {
           const d = DRV[x.a];
           if (d.t === 'AC') {   // DOB: драйвер на плате, заменить нельзя
@@ -84,6 +97,7 @@
         <td class="num">${isStrip ? '—' : `<input data-i="${i}" data-f="current" value="${s.current}" style="width:60px" placeholder="?">`}</td>
         <td>${FEAT.map(([k, t]) => `<label style="flex-direction:row;align-items:center;gap:3px;color:var(--ink);display:inline-flex;margin-right:6px"><input type="checkbox" data-i="${i}" data-feat="${k}" ${s.features.includes(k) ? 'checked' : ''} style="width:auto">${t}</label>`).join('')}</td></tr>`;
     });
+    if (tracks.length) h += `<tr><td colspan="7" style="background:#f6f4ef"><b>Трековые системы в проекте</b> — светильники на них учтены выше строками «трек»: ${tracks.map(t => `${esc(t.room)}: ${esc(t.c.replace(/^Магнитная трековая система\s*/i, ''))}${t.m ? ' — шинопровод ' + +t.m.toFixed(1) + ' м' : ''}${t.n ? ', светильников ' + t.n : ''}`).join('; ')}${sources.some(s => s.analogs) ? '. Светильники Exility / Exility X при управлении DALI или ZigBee заменяются на управляемые аналоги (DD2 — DALI, DSZ — ZigBee).' : ''}</td></tr>`;
     $('#ctTab').innerHTML = h;
     $('#ctTab').querySelectorAll('[data-f]').forEach(x => x.onchange = () => { sources[+x.dataset.i][x.dataset.f] = x.value; if (x.dataset.f === 'kind') drawSrc(); });
     $('#ctTab').querySelectorAll('[data-feat]').forEach(x => x.onchange = () => { const s = sources[+x.dataset.i]; s.features = ['onoff', ...FEAT.map(f => f[0]).filter(k => k === x.dataset.feat ? x.checked : s.features.includes(k))]; });
@@ -94,7 +108,21 @@
     return { object: $('#ctObj').value, stage: $('#ctStage').value, bus: $('#ctBus').value, internet: $('#ctNet').value, budget: $('#ctBudget').value,
       controls: controls.length ? controls : ['unknown'], extras: sc === 'unknown' ? ['none'] : ['scenes'], scenes: sc, rooms, sources };
   }
-  $('#ctFromKp').onclick = () => { const rows = window.PROJECT && PROJECT.data ? PROJECT.data.rows : MTUI.kp.get().rows; fromRows(rows); drawSrc(); $('#ctMsg').textContent = `Источников: ${sources.length} в ${rooms.length} помещениях${window.PROJECT && PROJECT.data ? ` (рабочий вариант «${PROJECT.data.variant}»)` : ' (из КП)'}.`; };
+  /** Рабочий вариант + то, что добавлено в КП сверх него (например, треки из «Комплектов»). */
+  function allRows() {
+    const kp = MTUI.kp.get().rows; if (!(window.PROJECT && PROJECT.data)) return kp;
+    const pr = PROJECT.data.rows, have = new Map(); pr.forEach(r => { const k = (r.room || '') + '|' + r.a; have.set(k, (have.get(k) || 0) + (+r.qty || 0)); });
+    const extra = []; kp.forEach(r => { const k = (r.room || '') + '|' + r.a, n = (+r.qty || 0) - (have.get(k) || 0); if (n > 0) { extra.push({ room: r.room, a: r.a, qty: n, note: '' }); have.set(k, (have.get(k) || 0) + n); } });
+    return pr.concat(extra);
+  }
+  function trackSummary(rows) {
+    const sys = new Map();
+    rows.forEach(r => { const x = MT.get(r.a); if (!x) return; const k = MT.kind(x); if (!['шинопровод', 'трековый', 'трековый подвесной'].includes(k)) return;
+      const key = (r.room || 'Помещение') + '|' + (x.c || 'трековая система'); const o = sys.get(key) || { room: r.room || 'Помещение', c: x.c || 'трековая система', m: 0, n: 0 };
+      if (k === 'шинопровод') o.m += (+r.qty || 0) * ((x.l || 1000) / 1000); else o.n += +r.qty || 0; sys.set(key, o); });
+    return [...sys.values()];
+  }
+  $('#ctFromKp').onclick = () => { const rows = allRows(); fromRows(rows); tracks = trackSummary(rows); drawSrc(); $('#ctMsg').textContent = `Источников: ${sources.length} в ${rooms.length} помещениях${window.PROJECT && PROJECT.data ? ` (рабочий вариант «${PROJECT.data.variant}»)` : ' (из КП)'}.`; };
   $('#ctGo').onclick = () => {
     if (!sources.length) $('#ctFromKp').click();
     if (!sources.length) return;
@@ -104,7 +132,7 @@
   const li = arr => (arr || []).filter(Boolean).map(x => `<li>${esc(x)}</li>`).join('');
   function itemRow(it, room) {
     const sku = (it.skus || []).find(a => MT.get(a)) || (it.skus || [])[0], x = sku && MT.get(sku);
-    if (sku && !it.generic) eqRows.push({ room: room || '', a: sku, qty: it.qty || 1, note: it.type });
+    if (sku && !it.generic) eqRows.push({ room: room || '', a: sku, qty: it.qty || 1, note: it.type, replace: it.replace || null });
     return `<tr><td>${esc(room || 'Весь объект')}</td><td>${esc(it.type)}</td><td>${sku ? `<b>${esc(sku)}</b>${it.skus.length > 1 ? `<div class="mute">или ${esc(it.skus.slice(1, 4).join(', '))}</div>` : ''}` : '<span class="mute">по месту</span>'}</td>
       <td>${x ? esc((x.n || '').slice(0, 70)) : ''}</td><td class="num">${it.qty || 1}</td><td class="num">${x ? rub(x.p) : '—'}</td>
       <td class="mute">${esc([...(it.notes || []), ...(it.pending || [])].join(' '))}${it.issue ? `<div style="color:var(--bad)">${esc(it.issue)}</div>` : ''}</td></tr>`;
@@ -128,13 +156,20 @@
       (r.roomItems || []).forEach(it => { t += itemRow(it, r.name); });
     });
     t += '</table>';
-    if (eq.dali) t += `<div class="note" style="margin-top:8px"><b>DALI:</b> ${esc(JSON.stringify(eq.dali).slice(0, 300))}</div>`;
+    if (eq.dali) { const D = eq.dali; t += `<div class="note" style="margin-top:8px"><b>DALI:</b> адресов ${D.total}${D.unknown && D.unknown.length ? ` (+ не известно для: ${esc(D.unknown.join(', '))})` : ''}, групп ${D.groups} из ${D.glimit}. ` +
+      (D.mode === 'repeater' && D.reps && D.reps.length ? `Ретрансляторы 721013: ${D.reps.map(r => `${esc(r.room)} — ${r.n} шт. на ${r.count} × «${esc(r.type)}»`).join('; ')}. Адресов после пересчёта: ${D.mainAfter} из ${D.limit} на мастер-контроллер.`
+        : D.mode === 'lines' && D.lines.length > 1 ? `Линий DALI: ${D.lines.length} (${D.lines.map(l => l.rooms.join(', ') + ' — ' + l.addr + ' адр.').join('; ')}).` : D.over ? 'Превышен лимит 64 адресов / 16 групп.' : `В пределах ${D.limit} адресов на мастер-контроллер.`) + '</div>'; }
     h += t + `<div class="row" style="margin-top:10px"><button class="b" id="ctToKp">Оборудование управления → в КП</button><span class="mute">Позиции «по месту» и «уточнить» в КП не добавляются.</span></div></div>`;
     $('#ctOut').innerHTML = h;
     $('#ctOut').querySelectorAll('[data-o]').forEach(d => d.onclick = () => { chosen = +d.dataset.o; render(); });
-    $('#ctToKp').onclick = e => { const rows = eqRows.filter(r => MT.get(r.a)); MTUI.kp.add(rows.map(r => ({ room: r.room, a: r.a, qty: r.qty })));
-      if (window.PROJECT && PROJECT.data) { PROJECT.data.rows.push(...rows.map(r => ({ room: r.room || 'Весь объект', a: r.a, qty: r.qty, note: r.note, group: 'Управление' }))); }
-      e.target.textContent = `Добавлено: ${rows.length} поз.`; };
+    $('#ctToKp').onclick = e => { const all = eqRows.filter(r => MT.get(r.a)), repl = all.filter(r => r.replace), rows = all.filter(r => !r.replace);
+      // замена светильников Exility на управляемые аналоги — в КП и рабочем варианте
+      const K = MTUI.kp.get(); let nr = 0;
+      repl.forEach(r => { K.rows.forEach((x, i) => { if (x.a === r.replace && (x.room || 'Помещение') === (r.room || 'Помещение')) { MTUI.kp.update(i, { a: r.a }); nr++; } });
+        if (window.PROJECT && PROJECT.data) PROJECT.data.rows.forEach(x => { if (x.a === r.replace && (x.room || 'Помещение') === (r.room || 'Помещение')) { x.a = r.a; x.note = (x.note ? x.note + '; ' : '') + 'управляемый аналог'; } }); });
+      MTUI.kp.add(rows.map(r => ({ room: r.room, a: r.a, qty: r.qty })));
+      if (window.PROJECT && PROJECT.data) { PROJECT.data.rows.push(...rows.map(r => ({ room: r.room || 'Весь объект', a: r.a, qty: r.qty, note: r.note, group: 'Управление' }))); try { localStorage.setItem('maytoni_project_v1', JSON.stringify(PROJECT.data)); } catch (er) { } }
+      e.target.textContent = `Добавлено: ${rows.length} поз.` + (nr ? `, заменено светильников: ${nr}` : ''); };
   }
   drawSrc();
   window.addEventListener('tab-shown', e => { if (e.detail === 'ctl' && !sources.length && (MTUI.kp.get().rows.length || (window.PROJECT && PROJECT.data))) $('#ctFromKp').click(); });

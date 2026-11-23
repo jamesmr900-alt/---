@@ -70,6 +70,10 @@ for x in d:
     if x['a'] in ('TRA034DR-300W-DD-W','TRA034DR-300W-DD-B') and not x.get('n'):
         x['n']='Источник напряжения встраиваемый Exility 48В, 300Вт универсальный, '+('белый' if x['a'].endswith('W') else 'черный')
         x.setdefault('c','Блоки питания 48В'); x.setdefault('comp','Магнитная трековая система 23мм EXILITY')
+# DALI: 721013 — ретранслятор (адреса), 721014 — усилитель длины шины (в прайсе ошибочно как источник напряжения)
+for x in d:
+    if x['a']=='721013': x.update(n='Ретранслятор DALI — устройства за ним занимают один адрес (до 64 на выход)', t='усилитель', se='DALI', c='DALI'); x.pop('w',None)
+    if x['a']=='721014': x.update(n='Усилитель DALI для увеличения длины шины', t='усилитель', se='DALI', c='DALI'); x.pop('w',None)
 dst=sys.argv[2] if len(sys.argv)>2 else 'data/catalog.json'
 json.dump(d,open(dst,'w'),ensure_ascii=False,separators=(',',':'))
 print('saved',dst,len(d))

@@ -558,6 +558,14 @@
 
   const plainType = (title, note) => ({ type: title, skus: [], qty: 1, notes: note ? [note] : [], pending: [], issue: null, generic: true, plain: true });
   const maytoniSystem = (title, note) => ({ type: title, skus: [], qty: 1, notes: [note || 'Система Maytoni. Шинопровод, светильники и блоки питания подбираются по каталогу системы.'], pending: [], issue: null, system: true });
+  /** Exility / Exility X: светильник меняется на управляемый аналог (DD2 — DALI, DSZ — ZigBee). */
+  function pushAnalog(zone, s, m) {
+    if (!s.analogs) return;
+    const a = s.analogs[m], tag = m === 'DALI' ? 'DD2' : 'DSZ', name = m === 'DALI' ? 'DALI' : 'ZigBee';
+    if (!a) { zone.items.push(Object.assign(generic('Управляемый аналог светильника ' + name), { issue: 'У светильника ' + s.a + ' нет аналога с ' + tag + ' — подберите другой светильник Exility с управлением ' + name + '.' })); return; }
+    if (a === s.a) return;
+    zone.items.push(item('Управляемый аналог светильника — ' + name, { skus: [a], qty: num(s.units) || 1, notes: ['Заменяет ' + s.a + ' (' + tag + ' — управление ' + name + '). При «→ в КП» светильник в КП заменится.'] }, { replace: s.a }));
+  }
   const realItems = list => list.filter(i => !['Уточнить', 'Внимание'].includes(i.type));
 
   function buildEquipment(p, option) {
@@ -655,7 +663,7 @@
       if (m === 'ZIGBEE') {
         if (k.v230) zone.items.push(generic(dim ? 'ZigBee-диммер с фазовым управлением' : 'ZigBee-выключатель', 'В ассортименте Maytoni нет — подбирается совместимый с хабом.'));
         else if (s.kind === 'led_repl') zone.items.push(item('Драйвер ZigBee — заменяет штатный', pickDriver(KIT.zigDriver, s)));
-        else if (s.kind === 'track48') zone.items.push(maytoniSystem('Магнитная трековая система Exility ZigBee 48 В'));
+        else if (s.kind === 'track48') { zone.items.push(maytoniSystem('Магнитная трековая система Exility ZigBee 48 В')); pushAnalog(zone, s, 'ZIGBEE'); }
         else { zone.items.push(item('Контроллер ZigBee', byCV(KIT.zigCV, s))); push(zone.items, psu(s)); }
       }
       if (m === 'DALI') {
@@ -663,7 +671,7 @@
         if (k.v230 && !dim) { relayZones.push({ name: zone.name, load: zone.load }); zone.items.push(generic('Канал релейного модуля DALI', 'Модули подобраны на весь объект.')); addr = 0; }
         else if (k.v230) { const sel = byLoad(KIT.daliPhase, null, zone.load, PHASE_K, 'зону'); zone.items.push(item('Диммер DALI DT6 TRIAC', sel)); addr = sel.qty || 1; }
         else if (s.kind === 'led_repl') { const sel = pickDriver(nd.cct ? KIT.daliDT8 : KIT.daliDT6, s); zone.items.push(item(nd.cct ? 'Драйвер DALI DT8 — заменяет штатный' : 'Драйвер DALI DT6 — заменяет штатный', sel)); addr = num(s.units) ? sel.qty || num(s.units) : null; }
-        else if (s.kind === 'track48') { zone.items.push(maytoniSystem('Магнитная трековая система Exility DALI 48 В')); addr = num(s.units); if (!addr) zone.pending.push('Укажите количество светильников на треке — у каждого свой адрес DALI.'); }
+        else if (s.kind === 'track48') { zone.items.push(maytoniSystem('Магнитная трековая система Exility DALI 48 В')); pushAnalog(zone, s, 'DALI'); addr = num(s.units); if (!addr) zone.pending.push('Укажите количество светильников на треке — у каждого свой адрес DALI.'); }
         else {
           const color = nd.cct || nd.rgb || ['strip_cct', 'strip_rgb', 'strip_rgbw'].includes(s.kind);
           const rgb = nd.rgb || ['strip_rgb', 'strip_rgbw'].includes(s.kind);
@@ -672,7 +680,8 @@
           zone.variants.push({ title: 'Вариант ' + (zone.variants.length + 1) + ' — контроллер DALI', items: [item(color ? 'Контроллер DALI DT8' : 'Диммер DALI DT6', cv), psu(s)].filter(Boolean) });
           addr = Math.max(...zone.variants.map(v => v.items[0].qty || 1));
         }
-        dali.zones.push({ id: zone.id, roomId: room.id, name: zone.name, addr });
+        const dev = s.kind === 'track48' ? null : (zone.variants.length ? zone.variants[0].items[0] : zone.items[zone.items.length - 1]);
+        dali.zones.push({ id: zone.id, roomId: room.id, name: zone.name, addr, track: s.kind === 'track48', dtype: dev && addr ? dev.type.replace(/ — заменяет штатный$/, '') + ((dev.skus || [])[0] ? ' ' + dev.skus[0] : '') : null });
       }
     }
     // Wi-Fi: упаковка зон помещения по каналам; панели и датчики по помещениям
@@ -745,9 +754,13 @@
       mNotes.push('До 64 адресов, 16 групп и 16 сцен на мастер-контроллер.');
       project.unshift(item('Мастер-контроллер DALI' + (lines > 1 ? ' — по одному на линию' : ''), { skus: [smartOnly ? '721010' : '721008'], qty: lines, notes: mNotes }));
       if (!smartOnly && (ctl.digital || ctl.remote)) project.splice(1, 0, item('Конвертер Wi-Fi / RF – DALI', { skus: ['721005'], qty: lines, notes: ['Управление DALI ' + [ctl.digital ? 'со смартфона и голосом' : '', ctl.remote ? 'с RF-пульта' : ''].filter(Boolean).join(' и ') + (lines > 1 ? '. По одному на линию.' : '.') + ' Поддерживает цвет (RGB) и оттенок белого (MIX).'] }));
-      if (daliInfo.mode === 'repeater' && daliInfo.picked.length) {
-        project.push(item('Усилитель-ретранслятор DALI', { skus: KIT.daliRepeater, qty: daliInfo.picked.length, notes: ['В схеме с ретранслятором светильники за ним управляются одной группой: ' + daliInfo.picked.map(z => z.name).join(', ') + '.'] }));
-        for (const r of rooms) for (const z of r.zones) if (daliInfo.picked.some(x => x.id === z.id)) z.notes.push('Зона за ретранслятором 721014: светильники управляются одной группой.');
+      if (daliInfo.mode === 'repeater' && daliInfo.reps.length) {
+        for (const rp of daliInfo.reps) {
+          const room = rooms.find(r => r.id === rp.roomId); if (!room) continue;
+          room.roomItems.unshift(item('Ретранслятор DALI — экономия адресов', { skus: KIT.daliRepeater, qty: rp.n, notes: [rp.count + ' × «' + rp.type + '»' + (rp.n > 1 ? ' за ' + rp.n + ' ретрансляторами (до 64 устройств на выход)' : ' за ретранслятором') + ' — адресов ' + rp.n + ' вместо ' + rp.count + '. Адресов в помещении: было ' + rp.before + ', стало ' + rp.after + '. Устройства за ретранслятором управляются одной группой.'] }));
+          for (const z of room.zones) if (rp.zones.includes(z.id)) z.notes.push('Зона за ретранслятором 721013: управляется одной группой.');
+        }
+        const m0 = project.find(i => /^Мастер-контроллер DALI/.test(i.type)); if (m0) m0.notes.push('Адресов: ' + daliInfo.total + ' → после ретрансляторов 721013: ' + daliInfo.mainAfter + '.');
       }
     }
     return { method: option.title, project, rooms, dali: daliInfo };
@@ -760,7 +773,7 @@
     const unknown = zones.filter(z => z.addr === null).map(z => z.name);
     const total = known.reduce((a, z) => a + z.addr, 0) + relayAddr;
     const groups = zones.length, GLIM = 16;
-    const info = { total, unknown, limit: LIMIT, groups, glimit: GLIM, over: total > LIMIT || groups > GLIM, mode: 'single', lines: [], picked: [], repeaterOk: false, recommended: 'single' };
+    const info = { total, unknown, limit: LIMIT, groups, glimit: GLIM, over: total > LIMIT || groups > GLIM, mode: 'single', lines: [], reps: [], picked: [], repeaterOk: false, recommended: 'single' };
     if (!info.over) return info;
     // Вариант 1: линии по помещениям
     const perRoom = rooms.map(r => ({ id: r.id, name: r.name, addr: known.filter(z => z.roomId === r.id).reduce((a, z) => a + z.addr, 0), groups: zones.filter(z => z.roomId === r.id).length })).filter(r => r.groups > 0);
@@ -768,16 +781,28 @@
     for (const r of perRoom) { if (cur.rooms.length && (cur.addr + r.addr > LIMIT || cur.groups + r.groups > GLIM)) { info.lines.push(cur); cur = { rooms: [], addr: 0, groups: 0 }; } cur.rooms.push(r.name); cur.addr += r.addr; cur.groups += r.groups; }
     if (cur.rooms.length) info.lines.push(cur);
     info.roomOver = perRoom.filter(r => r.addr > LIMIT || r.groups > GLIM).map(r => r.name);
-    // Вариант 2: ретранслятор — выносим крупные зоны
-    let main = total; const cand = known.filter(z => z.addr > 1 && z.addr <= LIMIT).sort((a, b) => b.addr - a.addr);
-    for (const z of cand) { if (main <= LIMIT) break; info.picked.push(z); main = main - z.addr + 1; }
+    // Вариант 2: ретранслятор 721013 — устройства одного типа в помещении за ним занимают один адрес (до 64 устройств на выход).
+    // Ставим в помещение с самым большим числом DALI-устройств одного типа, затем в следующее (по одному помещению — один тип), пока адресов не станет не больше 64.
+    const byRoom = new Map();
+    for (const z of known) { if (z.track || !z.dtype || !(z.addr > 0)) continue; const g = byRoom.get(z.roomId) || {}; const t = g[z.dtype] || (g[z.dtype] = { count: 0, zones: [] }); t.count += z.addr; t.zones.push(z); byRoom.set(z.roomId, g); }
+    const used = new Set(); let main = total; info.reps = [];
+    while (main > LIMIT) {
+      let best = null;
+      for (const [rid, g] of byRoom) { if (used.has(rid)) continue; for (const [type, t] of Object.entries(g)) if (t.count > 1 && (!best || t.count > best.count)) best = { rid, type, count: t.count, zones: t.zones }; }
+      if (!best) break;
+      const n = Math.ceil(best.count / LIMIT); used.add(best.rid);
+      const before = known.filter(z => z.roomId === best.rid).reduce((a, z) => a + z.addr, 0);
+      main = main - best.count + n;
+      const r = rooms.find(x => x.id === best.rid);
+      info.reps.push({ roomId: best.rid, room: r ? r.name : '', type: best.type, count: best.count, n, before, after: before - best.count + n, zones: best.zones.map(z => z.id) });
+      best.zones.forEach(z => info.picked.push(z));
+    }
     info.repeaterOk = main <= LIMIT && groups <= GLIM; info.mainAfter = main;
-    if (!info.repeaterOk) info.picked = [];
-    info.recommended = info.repeaterOk && info.picked.length === 1 ? 'repeater' : 'lines';
+    if (!info.repeaterOk) { info.picked = []; info.reps = []; }
+    info.recommended = info.repeaterOk ? 'repeater' : 'lines';
     info.mode = p.daliSplit === 'repeater' && info.repeaterOk ? 'repeater' : p.daliSplit === 'lines' ? 'lines' : info.recommended;
     return info;
   }
-
   const api = { KINDS, TITLES, STRIPS, LUMS, STRIPS_220: CAT.STRIPS_220, applyFix, evaluate, check, zoneHow: (m, s) => zoneHow(m, norm(s)), realItems, buildEquipment, capability: (m, s, o) => capability(m, norm(s), o), loadOf, voltageOf, needs };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MaytoniEngine = api;
