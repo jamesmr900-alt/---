@@ -15,7 +15,7 @@
   async function loadCatalog(url) { const r = await fetch(url || 'data/catalog.json'); return setCatalog(await r.json()); }
   const get = a => BY[String(a || '').trim().toUpperCase()] || null;
   const norm = s => String(s || '').toLowerCase().replace(/ё/g, 'е');
-  const imgOf = x => x && x.i ? 'data/img/' + String(x.a).replace(/[^A-Za-z0-9._-]/g, '_') + '.jpg' : null;
+  const imgOf = x => x && x.i ? (window.MT_IMG_BASE || '') + 'data/img/' + String(x.a).replace(/[^A-Za-z0-9._-]/g, '_') + '.jpg' : null;
   const inPrice = x => x && x.p > 0 && x.g !== 'Catalog';
 
   /** Тип устройства: ключевое слово, стоящее раньше всех в наименовании («Диммер RGBW DALI…» → диммер,

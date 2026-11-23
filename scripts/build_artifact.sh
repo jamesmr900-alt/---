@@ -1,12 +1,15 @@
 #!/bin/sh
-# Сборка версии для артефакта Claude (dist-artifact/): библиотеки — с CDN, разрешённых на claude.ai.
+# Сборка версии для артефакта Claude (dist-artifact/): весь сайт, кроме фото каталога
+# (фото берутся с сайта на Vercel). В артефакте ассистент работает через аккаунт Claude открывшего — без ключа API.
 set -e
 cd "$(dirname "$0")/.."
-rm -rf dist-artifact && mkdir -p dist-artifact/js dist-artifact/css dist-artifact/data
-cp index.html tools.html dist-artifact/ && cp css/app.css dist-artifact/css/ && cp data/catalog.json dist-artifact/data/
-cp js/config.js js/agent-def.js js/engine.js js/ui.js js/viz3d.js dist-artifact/js/
-X='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'
-P='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174'
-sed -i "s#vendor/xlsx.full.min.js#$X#; s#vendor/pdf.min.js#$P/pdf.min.js#g; s#vendor/pdf.worker.min.js#$P/pdf.worker.min.js#g" dist-artifact/index.html dist-artifact/tools.html
-sed -i "s#'../vendor/three.module.min.js'#'https://cdn.jsdelivr.net/npm/three@0.170.0/+esm'#; s#'../vendor/OrbitControls.js'#'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js/+esm'#" dist-artifact/js/viz3d.js
-grep -l vendor/ dist-artifact/*.html dist-artifact/js/*.js && { echo "остались ссылки на vendor/"; exit 1; } || echo "dist-artifact готов"
+rm -rf dist-artifact && mkdir -p dist-artifact
+git ls-files index.html tools.html css js vendor data | grep -v '^data/img/' | grep -v '\.txt$' | while read f; do mkdir -p "dist-artifact/$(dirname "$f")"; cp "$f" "dist-artifact/$f"; done
+# фото каталога — с сайта на Vercel
+for h in dist-artifact/index.html dist-artifact/tools.html; do
+  sed -i "s#<head>#<head><script>window.MT_IMG_BASE='https://barsikiss.vercel.app/';</script>#" "$h"
+done
+# xlsx — с CDN (файл содержит байты, которые хостинг артефактов не принимает как текст)
+sed -i "s#vendor/xlsx.full.min.js[^\"]*#https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js#" dist-artifact/index.html dist-artifact/tools.html
+rm -f dist-artifact/vendor/xlsx.full.min.js
+echo "dist-artifact готов: $(find dist-artifact -type f | wc -l) файлов, $(du -sh dist-artifact | cut -f1)"

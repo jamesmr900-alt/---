@@ -31,6 +31,7 @@
     remove(i) { KP.rows.splice(i, 1); kpSave(); },
     clear() { KP = { title: 'КП', rows: [] }; kpSave(); },
     on(f) { subs.push(f); },
+    refresh() { subs.forEach(f => f(KP)); },   // перерисовать КП (например, после загрузки каталога)
     priced: () => MT.priceKP(KP.rows),
     async exportXlsx(name) {
       const wb = MT.kpToXlsx(XLSX, KP.rows, KP.title), fn = (name || KP.title || 'КП').replace(/[\\/:*?"<>|]/g, '_') + '.xlsx';
