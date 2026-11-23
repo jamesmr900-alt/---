@@ -11,13 +11,17 @@
   /* ---------- PDF ---------- */
   S.open = async file => { const lib = await MTUI.loadPdfJs(); return lib.getDocument({ data: await file.arrayBuffer() }).promise; };
   /** Текстовые элементы в экранных координатах (scale) и строки текста. */
+  /** Текст из PDF с «кракозябрами» (кириллица cp1251, прочитанная как Latin-1: «Âåäîìîñòü») — перекодировать. */
+  const CP = 'АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдежзийклмнопрстуфхцчшщъыьэюя';
+  S.fixText = t => { if (!/[\u00C0-\u00FF]{2,}/.test(t) || /[\u0400-\u04FF]/.test(t)) return t;
+    return t.replace(/[\u00A8\u00B8\u00C0-\u00FF]/g, c => { const o = c.charCodeAt(0); return o === 0xA8 ? 'Ё' : o === 0xB8 ? 'ё' : CP[o - 0xC0]; }); };
   S.pageItems = async (doc, n, scale = 1) => {
     const lib = await MTUI.loadPdfJs(), pg = await doc.getPage(n), vp = pg.getViewport({ scale }), tc = await pg.getTextContent();
     const items = [];
     for (const it of tc.items) {
       if (!it.str || !it.str.trim()) continue;
       const t = lib.Util.transform(vp.transform, it.transform), fs = Math.hypot(t[2], t[3]) || 10 * scale;
-      items.push({ s: it.str.trim(), x: t[4], y: t[5], w: (it.width || 0) * scale, h: fs, rot: Math.round(Math.atan2(t[1], t[0]) * 180 / Math.PI) });
+      items.push({ s: S.fixText(it.str.trim()), x: t[4], y: t[5], w: (it.width || 0) * scale, h: fs, rot: Math.round(Math.atan2(t[1], t[0]) * 180 / Math.PI) });
     }
     return { items, W: vp.width, H: vp.height };
   };
@@ -27,7 +31,7 @@
     return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([, its]) => { its.sort((a, b) => a.x - b.x); let s = '', x = -1e9; for (const it of its) { s += (it.x - x > it.h * 0.8 ? '   ' : ' ') + it.s; x = it.x + it.w; } return { s: s.trim(), items: its, y: its[0].y, x: its[0].x }; });
   };
   S.title = items => { const big = items.filter(i => i.s.length > 6).sort((a, b) => b.h - a.h)[0]; return big ? S.linesOf(items).find(l => l.items.includes(big)).s : ''; };
-  S.floorOf = text => { const m = String(text).match(/\((\d)\s*этаж\s*\)|(\d)\s*[-–]?\s*(?:го|й|ый|ого)\s+этаж/i); return m ? +(m[1] || m[2]) : 0; };
+  S.floorOf = text => { const m = String(text).match(/\((\d)\s*этаж\s*\)|(\d)\s*[-–]?\s*(?:го|й|ый|ого)?\s*этаж/i); if (m) return +(m[1] || m[2]); const w = String(text).match(/(перв|втор|трет|четв|пят)[а-я]*\s+этаж/i); return w ? ['перв', 'втор', 'трет', 'четв', 'пят'].indexOf(w[1].toLowerCase()) + 1 : 0; };
   S.render = async (doc, n, scale) => {
     const pg = await doc.getPage(n), vp = pg.getViewport({ scale }), cv = document.createElement('canvas');
     cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
@@ -39,31 +43,34 @@
     for (let i = 0; i < g.length; i++) g[i] = 1 - (0.3 * d[i * 4] + 0.59 * d[i * 4 + 1] + 0.11 * d[i * 4 + 2]) / 255; return { g, w: cv.width, h: cv.height }; };
 
   /* ---------- таблицы: экспликация механизмов / условные обозначения / экспликация помещений ---------- */
-  const TYPE_RX = /(Выключател|Переключател|Мастер|Розетк|Рамк|Вентилятор|INT\b|Терморегул|Датчик|Кнопк|Звонок|Диммер|Светорегул|USB|HDMI|Интернет|RJ45|Телефон|Компьют|Телевиз|Домофон|Заглушк|Подсветк|Светильник|Бра\b|Люстр|Спот|Трек|Шинопровод|Лент|LED|Прожектор|Торшер)/i;
+  const TYPE_RX = /(Выключател|Переключател|Мастер|Розетк|Рамк|Вентилятор|INT\b|Подвес|Бра(?![а-яё])|Торшер|Ночник|Панел|Даунлайт|Downlight|Терморегул|Датчик|Кнопк|Звонок|Диммер|Светорегул|USB|HDMI|Интернет|RJ45|Телефон|Компьют|Телевиз|Домофон|Заглушк|Подсветк|Светильник|Бра\b|Люстр|Спот|Трек|Шинопровод|Лент|LED|Прожектор|Торшер)/i;
   S.TYPE_RX = TYPE_RX;
   /** Строки таблицы обозначений: подпись (и количество, если есть) + место значка слева от подписи. */
   S.legendRows = (items, W) => {
     const lines = S.linesOf(items), rows = [];
-    const head = items.find(i => /экспликац[а-я]*\s+механизм/i.test(i.s)) || items.find(i => /экспликац[а-я]*\s+светильник|ведомост[а-я]*\s+светильник/i.test(i.s)) || items.find(i => /условные\s+обозначени/i.test(i.s));
-    const uo = items.find(i => /^УО$/i.test(i.s)) || items.find(i => /^обознач/i.test(i.s) && (!head || (i.y > head.y && i.y < head.y + head.h * 6)));
+    const head = items.find(i => /экспликац[а-я]*\s+механизм|спецификаци[а-я]*\s+розет/i.test(i.s)) || items.find(i => /экспликац[а-я]*\s+светильник|ведомост[а-я]*\s+(светильник|по\s+электрик|осветит)|спецификаци[а-я]*\s+(светильник|осветит)/i.test(i.s)) || items.find(i => /условные\s+обозначени/i.test(i.s));
+    const near = i => !head || (i.y > head.y - head.h && i.y < head.y + head.h * 8 && Math.abs(i.x - head.x) < W * 0.35);
+    const uo = items.find(i => /^УО$/i.test(i.s) && near(i)) || items.find(i => /^(обознач|усл\.?(\s|$)|усл\.?\s*об|2d|символ|изображ|знак)/i.test(i.s) && near(i));
     const qh = items.find(i => /^(кол|коли)/i.test(i.s) && (!head || (i.y > head.y - head.h && i.y < head.y + head.h * 8))), rightLim = qh ? qh.x - 2 : 1e9;
     for (const ln of lines) {
       for (let k = 0; k < ln.items.length; k++) {
-        const it = ln.items[k]; if (!TYPE_RX.test(it.s)) continue;
+        const it = ln.items[k]; if (!TYPE_RX.test(it.s) || /^(вывод|электровывод|э-вывод|кабель|короб|щит)/i.test(it.s) || /^[а-яё(]/.test(it.s) || /\+7|e-?mail|www\.|тел\.?\s*:|телефон\s*:/i.test(ln.s)) continue;
         if (head && (it.y < head.y - 2 || Math.abs(it.x - head.x) > W * 0.25)) continue;    // только в блоке обозначений
         if (qh && (it.x > rightLim || it.x < qh.x - W * 0.3)) continue;
         let label = it.s, j = k + 1, qty = null;
         while (j < ln.items.length && ln.items[j].x < rightLim && Math.abs(ln.items[j].y - it.y) < it.h * 0.35 && ln.items[j].x - (ln.items[j - 1].x + ln.items[j - 1].w) < it.h * 1.5 && !/^\d{1,4}$/.test(ln.items[j].s)) label += ' ' + ln.items[j++].s;
         for (; j < ln.items.length; j++) { if (qh && ln.items[j].x > qh.x + qh.w + it.h * 3) break; if (/^\d{1,4}$/.test(ln.items[j].s)) { qty = +ln.items[j].s; break; } }
         if (rows.some(r => Math.abs(r.y - it.y) < it.h * 0.5)) continue;
-        // ячейка значка: слева от подписи
-        const left = uo ? uo.x - it.h * 0.6 : it.x - it.h * 4.2, right = it.x - it.h * 0.25;
+        // ячейка значка: колонка «УО / Усл. об. / 2D-символ» (слева или справа от подписи), иначе — слева от подписи
+        let left = uo ? uo.x - it.h * 0.6 : it.x - it.h * 4.2, right = it.x - it.h * 0.25;
+        if (uo && uo.x > it.x + it.h) { left = uo.x - it.h * 1.2; right = uo.x + Math.max(uo.w, it.h * 3) + it.h * 1.2; }
         rows.push({ label: label.replace(/\s+/g, ' ').trim(), qty, x: it.x, y: it.y, h: it.h, icon: { x0: left, x1: right, y0: it.y - it.h * 1.25, y1: it.y + it.h * 0.45 } });
         break;
       }
     }
     if (rows.length > 1) { const ys = rows.map(r => r.y).sort((a, b) => a - b), dd = ys.slice(1).map((y, i) => y - ys[i]).filter(d => d > 2).sort((a, b) => a - b), pitch = dd[dd.length >> 1]; if (isFinite(pitch)) rows.forEach(r => { r.icon.y0 = r.y - pitch * 0.72; r.icon.y1 = r.y + pitch * 0.22; }); }
-    return { rows, head, panelX: head ? head.x - (uo ? (head.x - uo.x) + W * 0.01 : W * 0.02) : null };
+    const lx = Math.min(...rows.map(r => Math.min(r.x, r.icon.x0)), head ? head.x : 1e9, uo ? uo.x : 1e9);
+    return { rows, head, qh, panelX: head ? Math.min(head.x - W * 0.02, (isFinite(lx) ? lx : head.x) - W * 0.01) : null };
   };
   /** Образец из ячейки: обрезка по «чернилам» без рамок таблицы. */
   S.cropIcon = (ink, box) => {
@@ -82,28 +89,55 @@
     let bx0 = 1e9, by0 = 1e9, bx1 = -1, by1 = -1;
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (ink.g[y * ink.w + x] > 0.08) { if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
     if (bx1 < 0 || bx1 - bx0 < 3 || by1 - by0 < 3) return null;
+    { // связные куски (с зазором 2 px); значок — самый крупный кусок и всё, что его касается
+      const w = bx1 - bx0 + 1, h = by1 - by0 + 1, lab = new Int32Array(w * h).fill(-1), comps = [];
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { if (lab[y * w + x] >= 0 || ink.g[(y + by0) * ink.w + x + bx0] <= 0.08) continue; const id = comps.length, q = [y * w + x]; lab[y * w + x] = id; let a = 0, c = { x0: x, y0: y, x1: x, y1: y, a: 0 };
+        while (q.length) { const v = q.pop(), vx = v % w, vy = (v - vx) / w; a++; if (vx < c.x0) c.x0 = vx; if (vx > c.x1) c.x1 = vx; if (vy < c.y0) c.y0 = vy; if (vy > c.y1) c.y1 = vy;
+          for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) { const nx = vx + i, ny = vy + j; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const n = ny * w + nx; if (lab[n] < 0 && ink.g[(ny + by0) * ink.w + nx + bx0] > 0.08) { lab[n] = id; q.push(n); } } }
+        c.a = a; comps.push(c); }
+      if (comps.length > 1) { comps.sort((p, q) => (q.x1 - q.x0 + 1) * (q.y1 - q.y0 + 1) - (p.x1 - p.x0 + 1) * (p.y1 - p.y0 + 1)); const m = comps[0];
+        bx1 = bx0 + m.x1; by1 = by0 + m.y1; bx0 = bx0 + m.x0; by0 = by0 + m.y0; if (bx1 - bx0 < 3 || by1 - by0 < 3) return null; }
+    }
     return { x: bx0 - 1, y: by0 - 1, w: bx1 - bx0 + 3, h: by1 - by0 + 3 };
   };
   /** Экспликация помещений: номер → название, площадь. */
   S.roomTable = items => {
-    const out = [];
+    S._fh = []; const out = []; let fl = 0;
     for (const ln of S.linesOf(items)) {
+      const fm = ln.s.match(/^\s*(\d)\s*[-–]?\s*(?:й|ой|ый)?\s*этаж|^\s*(перв|втор|трет)[а-я]*\s+этаж/i); if (fm && !/\d+[.,]\d/.test(ln.s)) { fl = fm[1] ? +fm[1] : ['перв', 'втор', 'трет'].indexOf(fm[2].toLowerCase()) + 1; (S._fh = S._fh || []).push({ y: ln.y, fl }); }
       const m = ln.s.match(/(?:^|\s)(\d{1,2})\s+([А-ЯЁA-Z][А-Яа-яёЁA-Za-z0-9 \-\/.,()]{2,40}?)\s+(\d{1,3}[.,]\d{1,2})(?:\s|$)/);
-      if (m && !/итого|всего|этаж$/i.test(m[2])) { const ni = ln.items.find(i => i.s === m[1]) || ln.items[0]; out.push({ no: +m[1], name: m[2].replace(/\s+/g, ' ').trim(), S: +m[3].replace(',', '.'), y: ln.y, x: ni.x }); }
+      if (m && !/итого|всего|этаж$|натуральн|сильвер|\bral\b|цвет|матов|глянц|покрыти|отделк|краск|ламинат|паркет|керамогр/i.test(m[2])) { const ni = ln.items.find(i => i.s === m[1]) || ln.items[0]; out.push({ no: +m[1], name: m[2].replace(/\s+/g, ' ').trim(), S: +m[3].replace(',', '.'), y: ln.y, x: ni.x, floor: fl }); }
     }
+    // строки с названием в две строки: номер по центру ячейки, название выше/ниже — собрать по колонке номеров
+    if (out.length) { const cx = out.map(r => r.x).sort((a, b) => a - b)[out.length >> 1], ys = out.map(r => r.y), yMin = Math.min(...ys), yMax = Math.max(...ys), pitch = (yMax - yMin) / Math.max(1, out.length - 1) || 60;
+      for (const it of items) { if (!/^\d{1,2}$/.test(it.s) || Math.abs(it.x - cx) > it.h * 1.5 || out.some(r => r.no === +it.s)) continue;
+        const near = items.filter(j => j !== it && Math.abs(j.y - it.y) < it.h * 1.4 && j.x > it.x + it.w);
+        const area = near.filter(j => /^\d{1,3}[.,]\d{1,2}$/.test(j.s)).sort((a, b) => a.x - b.x)[0]; if (!area) continue;
+        const name = near.filter(j => j.x < area.x && /[А-Яа-яЁёA-Za-z]/.test(j.s)).sort((a, b) => a.y - b.y || a.x - b.x).map(j => j.s).join(' ');
+        if (name && !/итого|всего|натуральн|сильвер|\bral\b|цвет|матов|глянц|покрыти|отделк|краск|плитк|ламинат|паркет|керамогр/i.test(name)) out.push({ no: +it.s, name: name.replace(/\s+/g, ' ').trim(), S: +area.s.replace(',', '.'), y: it.y, x: it.x }); } }
+    // этаж строки — по ближайшему заголовку «N этаж» выше
+    const hs = (S._fh || []).filter(h => out.some(r => Math.abs(r.y - h.y) < 400)); S._fh = [];
+    if (hs.length) out.forEach(r => { const h = hs.filter(q => q.y < r.y).sort((a, b) => b.y - a.y)[0]; r.floor = h ? h.fl : 0; });
     const seen = new Set(); return out.filter(r => !seen.has(r.no) && seen.add(r.no));
   };
   /** Номера помещений на плане (одна-две цифры вне таблицы). */
-  S.roomNumbers = (items, table, panelX) => {
+  S.roomNumbers = (items, table, panelX, ink) => {
     const nos = new Set(table.map(r => r.no)), xs = table.map(r => r.x).sort((a, b) => a - b), tx = xs[xs.length >> 1] - 40, ty0 = Math.min(...table.map(r => r.y)) - 20, ty1 = Math.max(...table.map(r => r.y)) + 20;
     const res = new Map();
     for (const it of items) {
       if (!/^\d{1,2}$/.test(it.s) || !nos.has(+it.s) || Math.abs(it.rot || 0) > 5) continue;
       if (it.x >= tx - 10 && it.y >= ty0 && it.y <= ty1) continue;
-      if (panelX && it.x > panelX) continue;
+      // (правая панель не исключается: таблицы бывают внизу, а план — справа от них)
       // часть размера «1 058» / «2,3» — не номер помещения
       if (items.some(j => j !== it && Math.abs(j.y - it.y) < it.h * 0.3 && ((j.x - (it.x + it.w) > -1 && j.x - (it.x + it.w) < it.h * 0.7 && /^[\d,.]/.test(j.s)) || (it.x - (j.x + j.w) > -1 && it.x - (j.x + j.w) < it.h * 0.7 && /[\d,.]$/.test(j.s))))) continue;
-      if (!res.has(+it.s)) res.set(+it.s, { x: it.x + it.w / 2, y: it.y - it.h * 0.35 });
+      const cx = it.x + it.w / 2, cy = it.y - it.h * 0.35;
+      // номер помещения обычно в кружке: проверяем кольцо вокруг цифры (красные «марки» групп и размеры — без кружка)
+      let ring = 0;
+      if (ink) for (const k of [0.6, 0.7, 0.8, 0.9, 1.0, 1.15, 1.3, 1.5]) { let hit = 0; const R = it.h * k; for (let a = 0; a < 32; a++) { const x = Math.round(cx + R * Math.cos(a / 32 * 6.283)), y = Math.round(cy + R * Math.sin(a / 32 * 6.283)); let v = 0; for (let d = -1; d <= 1; d++) v = Math.max(v, ink.g[(y + d) * ink.w + x] || 0, ink.g[y * ink.w + x + d] || 0); if (v > 0.3) hit++; } ring = Math.max(ring, hit / 32); }
+      const prev = res.get(+it.s);
+      if (items.some(j => (/м²|м2|кв\.?\s*м/i.test(j.s) || /^\d{1,3}[.,]\d{1,2}(\s*м)?/.test(j.s)) && j.y > it.y && j.y - it.y < it.h * 3 && Math.abs(j.x - it.x) < it.h * 4)) ring += 0.5;   // под номером — площадь
+      if (ink && ring < 0.45) continue;   // без кружка — не номер помещения
+      if (!prev || ring > prev.ring + 0.15) res.set(+it.s, { x: cx, y: cy, ring });
     }
     return res;
   };
@@ -114,8 +148,8 @@
     const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data, w = Math.floor(cv.width / ds), h = Math.floor(cv.height / ds), m = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       let dark = 0; for (let j = 0; j < ds; j++) for (let i = 0; i < ds; i++) { const k = ((y * ds + j) * cv.width + x * ds + i) * 4, r = d[k], g = d[k + 1], b = d[k + 2], l = 0.3 * r + 0.59 * g + 0.11 * b;
-        if (l < 175 && Math.max(r, g, b) - Math.min(r, g, b) < 40) dark++; }
-      m[y * w + x] = dark >= ds * ds * 0.5 ? 1 : 0;
+        if (l < 200 && Math.max(r, g, b) - Math.min(r, g, b) < 40) dark++; }
+      m[y * w + x] = dark >= ds * ds * 0.4 ? 1 : 0;
     }
     // открытие 3×3: убрать тонкие линии и текст
     const er = new Uint8Array(w * h), op = new Uint8Array(w * h);
@@ -136,7 +170,12 @@
       outer: for (let r = 0; r < 12; r++) for (let j = -r; j <= r; j++) for (let k = -r; k <= r; k++) { const nx = x + k, ny = y + j; if (nx >= 0 && ny >= 0 && nx < w && ny < h && !m[ny * w + nx]) { x = nx; y = ny; break outer; } }
       const s = y * w + x; if (lab[s] < 0) { lab[s] = i; q[qt++] = s; } });
     while (qh < qt) { const c = q[qh++], x = c % w, y = (c - x) / w; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const n = ny * w + nx; if (!m[n] && lab[n] < 0) { lab[n] = lab[c]; q[qt++] = n; } } }
-    return { lab, w, h, ds, at(px, py) { let x = Math.round(px / ds), y = Math.round(py / ds);
+    const L = labels.map(l => [l.x / ds, l.y / ds]);
+    const clear = (x0, y0, x1, y1) => { const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0)); let wall = 0; for (let i = 1; i < n; i++) { const x = Math.round(x0 + (x1 - x0) * i / n), y = Math.round(y0 + (y1 - y0) * i / n); if (m[y * w + x]) { if (++wall > 1) return false; } else wall = 0; } return true; };
+    return { lab, w, h, ds, at(px, py) {
+      // сначала — ближайшая метка «в прямой видимости» (без стены между значком и меткой), иначе — по пути в обход стен
+      const qx = px / ds, qy = py / ds; let bi = -1, bd = 1e9; L.forEach(([lx, ly], i) => { const d = Math.hypot(lx - qx, ly - qy); if (d < bd && clear(qx, qy, lx, ly)) { bd = d; bi = i; } }); if (bi >= 0) return bi;
+      let x = Math.round(px / ds), y = Math.round(py / ds);
       for (let r = 0; r < 10; r++) for (let j = -r; j <= r; j++) for (let k = -r; k <= r; k++) { const nx = x + k, ny = y + j; if (nx >= 0 && ny >= 0 && nx < w && ny < h && lab[ny * w + nx] >= 0) return lab[ny * w + nx]; }
       return -1; } };
   };
@@ -273,7 +312,13 @@
     const R = region || { x0: 0, y0: 0, x1: W, y1: H }, rx0 = Math.max(1, Math.floor(R.x0)), ry0 = Math.max(1, Math.floor(R.y0)), rx1 = Math.min(W - 2, Math.ceil(R.x1)), ry1 = Math.min(H - 2, Math.ceil(R.y1));
     // образцы: из того же рендера или (src) из рендера в масштабе значков плана — тогда рисунок совпадает пиксель в пиксель
     const tps = samples.map((s, i) => { const T = src && src.bbs[i] ? src : null, bb = T ? T.bbs[i] : s.bb, R0 = T ? T.rgb : rgb, W0 = T ? T.W : W, I0 = T ? T.ink : ink;
+      { const gi = S.glyphColor(R0, W0, bb); if (gi && gi.inner) return null; }   // рисунок другого цвета внутри цветной рамки — искать рисунок
       const f = S.fillOf(R0, W0, bb); if (!f) return null;
+      // значок с тёмным контуром вокруг заливки — этот способ; без контура (цветная точка, цветной контурный значок) — поиск по цветовой маске
+      { const I1 = I0, fg = (f.col[0] + f.col[1] + f.col[2]) / 3, th = Math.max(0.45, fg + 0.22), at = (x, y) => I1.g[y * I1.w + x] || 0; let n = 0, d = 0; const b = f.fb;
+        const P = (x, y, ox, oy) => { n++; if (at(x + ox, y + oy) > th || at(x + 2 * ox, y + 2 * oy) > th) d++; };
+        for (let x = b.x; x < b.x + b.w; x++) { P(x, b.y, 0, -1); P(x, b.y + b.h - 1, 0, 1); } for (let y = b.y; y < b.y + b.h; y++) { P(b.x, y, -1, 0); P(b.x + b.w - 1, y, 1, 0); }
+        if (d < n * 0.6) return null; }
       const fg = (f.col[0] + f.col[1] + f.col[2]) / 3, d = desc((x, y) => I0.g[y * I0.w + x] || 0, f.fb.x - 1, f.fb.y - 1, f.fb.w + 2, f.fb.h + 2), dm = desc((x, y) => (Math.abs((I0.g[y * I0.w + x] || 0) - fg) > 0.09 ? 1 : 0), f.fb.x - 1, f.fb.y - 1, f.fb.w + 2, f.fb.h + 2);
       const f0 = T ? S.fillOf(rgb, W, s.bb) : f;
       return { i, col: f.col, fs: Math.max((f0 || f).fb.w, (f0 || f).fb.h), d: [0, 1, 2, 3].map(r => rotDesc(d, r)), dm: [0, 1, 2, 3].map(r => rotDesc(dm, r)) }; });
@@ -373,6 +418,48 @@
     found.length = 0; found.push(...keep);
     const fss = tps.filter(Boolean).map(t => t.fs).sort((a, b) => a - b);
     return { found, size: Sz, tplSize: fss.length ? fss[fss.length >> 1] : 0, noColor: tps.map((t, i) => (t ? null : i)).filter(v => v != null) };
+  };
+  /** Главный цвет значка (насыщенный), если есть. */
+  S.keyColor = (rgb, W, bb) => { const h = new Map(); let n = 0;
+    for (let y = bb.y; y < bb.y + bb.h; y++) for (let x = bb.x; x < bb.x + bb.w; x++) { const k = (y * W + x) * 4, r = rgb[k], g = rgb[k + 1], b = rgb[k + 2]; if (Math.max(r, g, b) - Math.min(r, g, b) < 60) continue; n++; const key = (r >> 4) + ',' + (g >> 4) + ',' + (b >> 4); h.set(key, (h.get(key) || 0) + 1); }
+    if (n < 6) return null; let bk = null, bc = 0; for (const [k, c] of h) if (c > bc) { bc = c; bk = k; } return bk.split(',').map(v => +v * 16 + 8); };
+  /** Цвет значка для поиска: если значок — цветная рамка/заливка с рисунком другого цвета внутри (розетка в розовой рамке), ищем рисунок. */
+  S.glyphColor = (rgb, W, bb) => {
+    const h = new Map();
+    for (let y = bb.y; y < bb.y + bb.h; y++) for (let x = bb.x; x < bb.x + bb.w; x++) { const k = (y * W + x) * 4, r = rgb[k], g = rgb[k + 1], b = rgb[k + 2]; if (Math.max(r, g, b) - Math.min(r, g, b) < 50) continue; const key = (r >> 4) + ',' + (g >> 4) + ',' + (b >> 4); const e = h.get(key) || { n: 0, c: [r & 0xF0 | 8, g & 0xF0 | 8, b & 0xF0 | 8] }; e.n++; h.set(key, e); }
+    const cl = []; for (const e of [...h.values()].sort((a, b) => b.n - a.n)) { const m = cl.find(c => Math.max(...c.c.map((v, i) => Math.abs(v - e.c[i]))) < 48); if (m) m.n += e.n; else cl.push({ c: e.c, n: e.n }); }
+    if (!cl.length || cl[0].n < 6) return null;
+    const lum = c => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2], area = bb.w * bb.h;
+    let pick = cl[0];
+    if (cl[0].n > area * 0.3) { const g2 = cl.slice(1).find(c => c.n >= 12 && lum(c.c) < lum(cl[0].c) - 30); if (g2) pick = g2; }
+    // рамка рисунка этого цвета
+    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+    for (let y = bb.y; y < bb.y + bb.h; y++) for (let x = bb.x; x < bb.x + bb.w; x++) { const k = (y * W + x) * 4; if (Math.max(Math.abs(rgb[k] - pick.c[0]), Math.abs(rgb[k + 1] - pick.c[1]), Math.abs(rgb[k + 2] - pick.c[2])) < 48) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } }
+    return { c: pick.c, bb: pick === cl[0] ? bb : { x: x0 - 1, y: y0 - 1, w: x1 - x0 + 3, h: y1 - y0 + 3 }, inner: pick !== cl[0] };
+  };
+  /** Обрезать рамку-контур значка того же цвета: остаётся рисунок внутри (розетка внутри рамки). */
+  S.trimFrame = m => {
+    let x0 = 0, y0 = 0, x1 = m.w - 1, y1 = m.h - 1; const at = (x, y) => m.g[y * m.w + x];
+    const row = y => { let c = 0; for (let x = x0; x <= x1; x++) c += at(x, y) > 0.5; return c / (x1 - x0 + 1); }, col = x => { let c = 0; for (let y = y0; y <= y1; y++) c += at(x, y) > 0.5; return c / (y1 - y0 + 1); };
+    let cut = false;
+    for (let k = 0; k < 4; k++) { // контур + отступ
+      while (y1 - y0 > 6 && row(y0) < 0.02) y0++; while (y1 - y0 > 6 && row(y1) < 0.02) y1--; while (x1 - x0 > 6 && col(x0) < 0.02) x0++; while (x1 - x0 > 6 && col(x1) < 0.02) x1--;
+      if (row(y0) > 0.6 && row(y1) > 0.6 && col(x0) > 0.6 && col(x1) > 0.6 && x1 - x0 > 10 && y1 - y0 > 10) { let d = 0; while (d < 4 && (row(y0) > 0.4 || col(x0) > 0.4)) { y0++; y1--; x0++; x1--; d++; } cut = true; } else break; }
+    if (!cut) return null;
+    while (y1 - y0 > 4 && row(y0) < 0.02) y0++; while (y1 - y0 > 4 && row(y1) < 0.02) y1--; while (x1 - x0 > 4 && col(x0) < 0.02) x0++; while (x1 - x0 > 4 && col(x1) < 0.02) x1--;
+    if (x1 - x0 < 4 || y1 - y0 < 4) return null;
+    x0 = Math.max(0, x0 - 1); y0 = Math.max(0, y0 - 1); x1 = Math.min(m.w - 1, x1 + 1); y1 = Math.min(m.h - 1, y1 + 1);
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, g = new Float32Array(w * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) g[y * w + x] = at(x + x0, y + y0); return { g, w, h, dx: x0, dy: y0 };
+  };
+  /** «Чернила» по цвету: 1 — пиксель того же цвета, 0 — другой (линии другого цвета, текст, штриховка не мешают). */
+  S.colorInk = (rgb, W, H, col, box) => { const x0 = box ? box.x : 0, y0 = box ? box.y : 0, w = box ? box.w : W, h = box ? box.h : H, g = new Float32Array(w * h);
+    const sat = Math.max(...col) - Math.min(...col);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const k = ((y + y0) * W + x + x0) * 4, r = rgb[k], gg = rgb[k + 1], b = rgb[k + 2];
+      const d = Math.max(Math.abs(r - col[0]), Math.abs(gg - col[1]), Math.abs(b - col[2])), s2 = Math.max(r, gg, b) - Math.min(r, gg, b);
+      // сглаженные края — частичное совпадение: оттенок тот же, насыщенность меньше
+      let v = d < 40 ? 1 : 0; if (!v && sat > 60 && s2 > 25) { const hue = (c) => Math.atan2(Math.sqrt(3) * (c[1] - c[2]), 2 * c[0] - c[1] - c[2]); const dh = Math.abs(hue([r, gg, b]) - hue(col)); if (Math.min(dh, 2 * Math.PI - dh) < 0.35) v = Math.min(1, s2 / sat); }
+      g[y * w + x] = v; }
+    return { g, w, h };
   };
   window.SYM = S;
 })();

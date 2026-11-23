@@ -60,7 +60,8 @@
         const { items } = await SYM.pageItems(st.doc, i, 1), all = items.map(x => x.s).join(' ');
         const t = (all.match(/План.{5,110}?(?:\(\d\s*этаж\)|\d-го этажа)/i) || [SYM.title(items)])[0].slice(0, 110);
         const kind = /экспликац[а-я]*\s+механизм|электроустановочн[а-я]*\s+оборудован|план[а-я ,.]{0,40}розет/i.test(all) ? 'eui' : /расстановки\s+светильник|привязки\s+осветит|план\s+освещени|осветительн[а-я]*\s+прибор/i.test(all) ? 'light' : /экспликац[а-я]*\s+помещени/i.test(all) ? 'rooms' : '';
-        st.titles.push({ n: i, t, kind, floor: SYM.floorOf(t || all) });
+        const pf = all.match(/план[^.]{0,140}?(?:\d\s*[-–]?\s*(?:го|й)?\s*этаж|(?:перв|втор|трет|четв)[а-я]*\s+этаж)/i);
+        st.titles.push({ n: i, t, kind, floor: SYM.floorOf(t) || (pf ? SYM.floorOf(pf[0]) : 0) });
         if (kind === 'eui' && !bestE) bestE = i; if (kind === 'light' && !bestL) bestL = i;
         if (i % 10 === 0) setMsg(`Читаю листы: ${i} из ${st.doc.numPages}…`);
       }
@@ -82,25 +83,43 @@
     st.frameLbl = SYM.frameLabels(st.items);
     st.panelX = lg.panelX;
     for (const r of lg.rows) {
-      const bb = SYM.cropIcon(st.ink, r.icon); if (!bb) continue;
+      const icon0 = Object.assign({}, r.icon);
+      // высота ячейки — по линиям таблицы над и под подписью (строки бывают в 2–3 строки текста)
+      { const x0 = Math.max(0, Math.round(r.icon.x0)), x1 = Math.min(st.ink.w - 1, Math.round(r.icon.x1)), full = y => { let c = 0; for (let x = x0; x <= x1; x++) c += st.ink.g[y * st.ink.w + x] > 0.3; return c > (x1 - x0 + 1) * 0.6; };
+        let up = -1, dn = -1; for (let y = Math.round(r.y - r.h * 0.3); y > r.y - r.h * 5 && y > 0; y--) if (full(y)) { up = y; break; }
+        for (let y = Math.round(r.y + r.h * 0.1); y < r.y + r.h * 6 && y < st.ink.h - 1; y++) if (full(y)) { dn = y; break; }
+        if (up > 0 && dn > up) { r.icon.y0 = up + 1; r.icon.y1 = dn - 1;
+          if (r.qty == null && lg.qh) { const q = st.items.find(i => /^\d{1,4}$/.test(i.s) && Math.abs(i.x + i.w / 2 - (lg.qh.x + lg.qh.w / 2)) < lg.qh.w + i.h * 2 && i.y > up && i.y < dn); if (q) r.qty = +q.s; } } }
+      const b1 = SYM.cropIcon(st.ink, r.icon), b0 = SYM.cropIcon(st.ink, icon0);
+      const bb = b1 && b0 ? (b0.w * b0.h <= b1.w * b1.h ? b0 : b1) : b1 || b0; if (!bb) continue;   // из двух вариантов ячейки — более точный (меньший)
       addSample(r.label, bb, r.qty);
     }
     // область поиска: план без правой панели и без примечаний внизу
     const notes = st.items.find(i => /^Примечани/i.test(i.s) && (!st.panelX || i.x < st.panelX * 0.6) && i.y > st.cv.height * 0.55);
     // таблица обозначений справа сверху — исключить полосу справа целиком; таблица ниже середины — исключить только её прямоугольник до низа листа
     st.exclude = [];
-    if (st.panelX && lg.head) { if (lg.head.y < st.cv.height * 0.3) st.exclude.push({ x0: st.panelX, y0: 0, x1: st.cv.width, y1: st.cv.height }); else st.exclude.push({ x0: st.panelX, y0: lg.head.y - lg.head.h * 0.6, x1: st.cv.width, y1: st.cv.height }); }
+    if (lg.head && !lg.rows.length) st.exclude.push({ x0: lg.head.x - st.cv.width * 0.08, y0: lg.head.y - lg.head.h * 2, x1: Math.min(st.cv.width, lg.head.x + st.cv.width * 0.3), y1: st.cv.height });
+    if (st.panelX && lg.head && lg.rows.length) {   // таблица обозначений — прямоугольник от заголовка до последней строки
+      const ys = lg.rows.map(r => r.icon.y1).concat(lg.rows.map(r => r.y + r.h)), bottom = ys.length ? Math.max(...ys) + lg.head.h * 3 : st.cv.height;
+      const right = Math.max(lg.head.x + lg.head.w, lg.qh ? lg.qh.x + lg.qh.w : 0, ...lg.rows.map(r => r.icon.x1), ...lg.rows.map(r => r.x + r.h * 12)) + lg.head.h * 3;
+      st.exclude.push({ x0: st.panelX, y0: lg.head.y - lg.head.h * 1.5, x1: Math.min(st.cv.width, right), y1: Math.min(st.cv.height, bottom) }); }
     st.region = { x0: 0, y0: 0, x1: st.cv.width, y1: notes ? notes.y - notes.h * 1.5 : st.cv.height };
     $('#dWork').hidden = false; fit(); drawSamples(); draw();
     await autoRooms();
     setMsg(`Лист ${st.page}: образцов из таблицы — ${st.samples.length}${lg.rows.length > st.samples.length ? ` (из ${lg.rows.length} строк)` : ''}, помещений — ${st.rooms.length}. Проверьте образцы и нажмите «Найти значки». Если значок не взялся — инструмент «образец».`);
   };
+  /** Значок — ЭУИ (розетка, выключатель…) или светильник; для светильника — модель по описанию (можно поменять). */
+  function classify(s, keepA) {
+    if (s.frame) { s.kind = 'frame'; s.vid = ''; return; }
+    const eui = window.KPM ? KPM.EUI_RX.test(s.label) : /розет|выключ|переключ/i.test(s.label), m = window.VOLTUM ? VOLTUM.mapType(s.label) : {};
+    if (eui || (st.mode === 'eui' && !/светил|люстр|бра|подвес|спот|трек/i.test(s.label))) { s.kind = 'eui'; s.vid = m.id || ''; s.a = ''; }
+    else { s.kind = 'light'; s.vid = ''; if (!keepA || !s.a) { const r = window.KPM ? KPM.suggest(s.label) : { a: '', why: '' }; s.a = r.a; s.why = r.why; s.alts = r.alts; } }
+  }
   function addSample(label, bb, qty) {
     const i = st.samples.length, c = SYM.cut(st.ink, bb);
     const fr = /рамк/i.test(label) ? +((label.match(/(\d)\s*-?\s*пост/i) || label.match(/(\d)/) || [])[1] || 0) : 0;
     const s = { label, bb, qty, g: c.g, w: c.w, h: c.h, color: COLORS[i % COLORS.length], on: !fr, frame: fr || 0 };
-    if (st.mode === 'eui') s.vid = fr ? '' : window.VOLTUM ? (VOLTUM.mapType(label).id || '') : '';
-    else { s.a = ''; try { const r = MT.analogsBySpec(label, 1); if (r.list && r.list[0]) s.a = r.list[0].item.a; } catch (e) { } }
+    classify(s);
     st.samples.push(s); return s;
   }
   /* ---------- помещения ---------- */
@@ -108,12 +127,12 @@
     st.rooms = [];
     const cur = st.titles[st.page - 1], floor = cur ? cur.floor : 0, base = await st.doc.getPage(st.page), bvp = base.getViewport({ scale: 1 });
     let best = null;
-    const cands = st.titles.filter(p => p.kind === 'rooms' || p.n === st.page).sort((a, b) => (b.floor === floor) - (a.floor === floor));
+    const cands = st.titles.filter(p => p.kind === 'rooms' || p.n === st.page).sort((a, b) => (b.n === st.page) - (a.n === st.page) || (b.floor === floor) - (a.floor === floor));
     for (const p of cands) {
       if (floor && p.floor && p.floor !== floor) continue;
       const pg = await st.doc.getPage(p.n), vp = pg.getViewport({ scale: 1 }); if (Math.abs(vp.width - bvp.width) > 2 || Math.abs(vp.height - bvp.height) > 2) continue;
-      const { items, W } = await SYM.pageItems(st.doc, p.n, SC), tab = SYM.roomTable(items); if (tab.length < 2) continue;
-      const lg = SYM.legendRows(items, W), nums = SYM.roomNumbers(items, tab, lg.panelX);
+      const { items, W } = await SYM.pageItems(st.doc, p.n, SC); let tab = SYM.roomTable(items); if (floor && tab.some(r => r.floor === floor)) tab = tab.filter(r => r.floor === floor); if (tab.length < 2) continue;
+      const lg = SYM.legendRows(items, W), nums = SYM.roomNumbers(items, tab, lg.panelX, p.n === st.page ? st.ink : (await SYM.render(st.doc, p.n, SC).then(c => SYM.ink(c))));
       const score = nums.size / tab.length; if (!best || score > best.score) best = { score, tab, nums, n: p.n };
       if (score > 0.8) break;
     }
@@ -149,9 +168,9 @@
     const V = window.VOLTUM && VOLTUM.catalog;
     b.innerHTML = st.samples.map((s, i) => {
       const found = st.dets.filter(d => d.ti === i && !d.off).length;
-      const map = s.frame ? `<span class="mute" style="font-size:12px">рамка на ${s.frame} пост${s.frame === 1 ? '' : 'а'} — считается по значкам вплотную${st.frameLbl && st.frameLbl.length ? ' и подписям «Р-0N»' : ''}</span>` : st.mode === 'eui'
-        ? `<select data-sv="${i}" style="font-size:12px;width:100%"><option value="">— не считать —</option>${V ? V.items.map(it => `<option value="${it.id}"${it.id === s.vid ? ' selected' : ''}>${esc(it.n)}</option>`).join('') : ''}</select>`
-        : `<input data-sa="${i}" value="${esc(s.a || '')}" placeholder="артикул Maytoni" style="font-size:12px;width:130px"> <span class="mute" style="font-size:11px">${esc(((MT.get(s.a) || {}).n || '').slice(0, 40))}</span>`;
+      const map = s.frame ? `<span class="mute" style="font-size:12px">рамка на ${s.frame} пост${s.frame === 1 ? '' : 'а'} — считается по значкам вплотную${st.frameLbl && st.frameLbl.length ? ' и подписям «Р-0N»' : ''}</span>` : s.kind === 'eui'
+        ? `<span class="mute" style="font-size:11px">ЭУИ:</span> <select data-sv="${i}" style="font-size:12px;width:85%"><option value="">— не считать —</option>${V ? V.items.map(it => `<option value="${it.id}"${it.id === s.vid ? ' selected' : ''}>${esc(it.n)}</option>`).join('') : ''}</select> <a href="#" data-sk="${i}" style="font-size:11px">это светильник</a>`
+        : `<span class="mute" style="font-size:11px">светильник:</span> <input data-sa="${i}" value="${esc(s.a || '')}" placeholder="артикул Maytoni" list="dAlt${i}" style="font-size:12px;width:130px"><datalist id="dAlt${i}">${(s.alts || []).map(a => `<option value="${esc(a)}">${esc(((MT.get(a) || {}).n || '').slice(0, 60))}</option>`).join('')}</datalist> <a href="#" data-sk="${i}" style="font-size:11px">это ЭУИ</a><div class="mute" style="font-size:11px">${esc(((MT.get(s.a) || {}).n || 'модель не подобрана').slice(0, 60))}${s.why ? ' · ' + esc(s.why) : ''}</div>`;
       return `<div style="border-top:1px solid var(--line);padding:4px 0;${i === st.selSample ? 'background:#f2f7ff' : ''}" data-ss="${i}">
         <div class="row" style="gap:5px;align-items:center"><input type="checkbox" data-son="${i}" ${s.on ? 'checked' : ''} style="width:auto"><canvas data-th="${i}" width="40" height="28" style="border:2px solid ${s.color};border-radius:4px;background:#fff"></canvas>
         <input data-sl="${i}" value="${esc(s.label)}" style="flex:1;font-size:12px"><button class="b ghost sm" data-sx="${i}" title="удалить образец">✕</button></div>
@@ -161,9 +180,10 @@
     st.samples.forEach((s, i) => { const c = b.querySelector(`[data-th="${i}"]`).getContext('2d'), k = Math.min(40 / s.w, 28 / s.h); c.drawImage(st.cv, s.bb.x, s.bb.y, s.bb.w, s.bb.h, (40 - s.w * k) / 2, (28 - s.h * k) / 2, s.w * k, s.h * k); });
     b.querySelectorAll('[data-ss]').forEach(x => x.onclick = e => { if (e.target.closest('input,select,button')) return; st.selSample = +x.dataset.ss; drawSamples(); });
     b.querySelectorAll('[data-son]').forEach(x => x.onchange = () => { st.samples[+x.dataset.son].on = x.checked; draw(); results(); });
-    b.querySelectorAll('[data-sl]').forEach(x => x.onchange = () => { st.samples[+x.dataset.sl].label = x.value; results(); });
+    b.querySelectorAll('[data-sl]').forEach(x => x.onchange = () => { const q = st.samples[+x.dataset.sl]; q.label = x.value; const fr = /рамк/i.test(q.label) ? +((q.label.match(/(\d)\s*-?\s*пост/i) || q.label.match(/(\d)/) || [])[1] || 0) : 0; q.frame = fr; if (!q.manualA) classify(q); drawSamples(); results(); });
+    b.querySelectorAll('[data-sk]').forEach(x => x.onclick = e => { e.preventDefault(); const q = st.samples[+x.dataset.sk]; if (q.kind === 'eui') { q.kind = 'light'; const r = KPM.suggest(q.label); q.a = r.a; q.why = r.why; q.alts = r.alts; q.vid = ''; } else { q.kind = 'eui'; q.vid = (VOLTUM.mapType(q.label).id || ''); q.a = ''; } drawSamples(); results(); });
     b.querySelectorAll('[data-sv]').forEach(x => x.onchange = () => { st.samples[+x.dataset.sv].vid = x.value; results(); });
-    b.querySelectorAll('[data-sa]').forEach(x => x.onchange = () => { const v = x.value.trim(), it = MT.get(v); st.samples[+x.dataset.sa].a = it ? it.a : v; drawSamples(); results(); });
+    b.querySelectorAll('[data-sa]').forEach(x => x.onchange = () => { const v = x.value.trim(), it = MT.get(v), q = st.samples[+x.dataset.sa]; if (it) { q.a = it.a; q.why = 'выбрано вручную'; q.manualA = true; } else if (!v) { q.manualA = false; classify(q); } else q.a = v; drawSamples(); results(); });
     b.querySelectorAll('[data-sx]').forEach(x => x.onclick = () => { const i = +x.dataset.sx; st.samples.splice(i, 1); st.dets = st.dets.filter(d => d.ti !== i).map(d => (d.ti > i ? Object.assign(d, { ti: d.ti - 1 }) : d)); st.selSample = 0; drawSamples(); draw(); results(); });
   }
   /* ---------- поиск ---------- */
@@ -184,9 +204,21 @@
         st._tpl = { cv2, bbs, k }; byC = SYM.findByColor(st.rgb, st.cv.width, st.cv.height, st.ink, act.map(o => o.s), st.region, { rgb: rgb2, W: cv2.width, ink: ink2, bbs });
       }
       st.symSize = [byC.size, byC.tplSize, st._tpl ? st._tpl.k : 1]; let found = byC.found.map(d => Object.assign(d, { ti: act[d.ti].i }));
-      const rest = byC.noColor.map(k => act[k]);   // чёрно-белые образцы — поиск по рисунку
-      if (rest.length) { const f2 = await SYM.find(st.ink, rest.map(o => o.s), +$('#dThr').value, st.region, p => prog(`Ищу значки… ${Math.round(p * 100)}%`));
-        f2.forEach(d => { d.ti = rest[d.ti].i; if (!found.some(o => Math.abs(o.x + o.w / 2 - d.x - d.w / 2) < o.w * 0.6 && Math.abs(o.y + o.h / 2 - d.y - d.h / 2) < o.h * 0.6)) found.push(d); }); }
+      const rest = byC.noColor.map(k => act[k]);
+      // цветные значки без контура (точки, кружки, контурные значки цветом) — по цветовой маске; чёрно-белые — по рисунку
+      const byCol = new Map(), bw = [];
+      rest.forEach(o => { const gc = SYM.glyphColor(st.rgb, st.cv.width, o.s.bb); if (!gc) { bw.push(o); return; } o.gbb = gc.bb; const c = gc.c, key = c.map(v => v >> 5).join(','); if (!byCol.has(key)) byCol.set(key, { c, list: [] }); byCol.get(key).list.push(o); });
+      const addF = (f2, list) => f2.forEach(d => { d.ti = list[d.ti].i; d.grp = 'm' + d.ti + '#' + (d.r || 0); if (!found.some(o => Math.abs(o.x + o.w / 2 - d.x - d.w / 2) < Math.min(o.w, d.w) * 0.6 && Math.abs(o.y + o.h / 2 - d.y - d.h / 2) < Math.min(o.h, d.h) * 0.6)) found.push(d); });
+      let gi = 0; for (const { c, list } of byCol.values()) {
+        prog(`Ищу цветные значки… ${++gi}/${byCol.size}`);
+        const mi = SYM.colorInk(st.rgb, st.cv.width, st.cv.height, c);
+        const tpl = list.map(o => { const m = SYM.colorInk(st.rgb, st.cv.width, st.cv.height, c, o.gbb || o.s.bb); return SYM.trimFrame(m) || m; });
+        const f2 = await SYM.find(mi, tpl, Math.max(0.6, +$('#dThr').value - 0.08), st.region, p => prog(`Ищу цветные значки… ${gi}/${byCol.size}: ${Math.round(p * 100)}%`));
+        addF(f2, list);
+      }
+      if (bw.length) { const f2 = await SYM.find(st.ink, bw.map(o => o.s), +$('#dThr').value, st.region, p => prog(`Ищу значки… ${Math.round(p * 100)}%`)); addF(f2, bw); }
+      // повторы одного значка (соседние сдвиги по линии) — оставить лучший
+      found.sort((a, b) => (b.c || 0) - (a.c || 0)); { const keep = []; for (const d of found) if (!keep.some(o => Math.hypot(o.x + o.w / 2 - d.x - d.w / 2, o.y + o.h / 2 - d.y - d.h / 2) < Math.max(o.w, d.w, o.h, d.h) * 1.05)) keep.push(d); found = keep; }
       // значки внутри ячеек таблицы-экспликации не считаем
       st.dets = found.filter(d => !(st.exclude || []).some(e => d.x + d.w / 2 > e.x0 && d.x + d.w / 2 < e.x1 && d.y + d.h / 2 > e.y0 && d.y + d.h / 2 < e.y1)).filter(d => !st.samples.some(s => d.x < s.bb.x + s.bb.w && d.x + d.w > s.bb.x && d.y < s.bb.y + s.bb.h && d.y + d.h > s.bb.y));
       assignRooms();
@@ -224,7 +256,7 @@
     if (st.region) { ctx.strokeStyle = 'rgba(0,120,255,.5)'; ctx.setLineDash([8 / st.view.s, 6 / st.view.s]); ctx.lineWidth = lw; ctx.strokeRect(st.region.x0, st.region.y0, st.region.x1 - st.region.x0, st.region.y1 - st.region.y0); ctx.setLineDash([]); }
     st.samples.forEach(s => { ctx.strokeStyle = s.color; ctx.lineWidth = lw * 1.5; ctx.strokeRect(s.bb.x, s.bb.y, s.bb.w, s.bb.h); });
     // рамки ЭУИ
-    if (st.mode === 'eui') for (const cl of frameClusters()) { if (cl.length < 2) continue; const ds = cl.map(i => st.dets[i]); const x0 = Math.min(...ds.map(d => d.x)), y0 = Math.min(...ds.map(d => d.y)), x1 = Math.max(...ds.map(d => d.x + d.w)), y1 = Math.max(...ds.map(d => d.y + d.h));
+    for (const cl of frameClusters()) { if (cl.length < 2) continue; const ds = cl.map(i => st.dets[i]); const x0 = Math.min(...ds.map(d => d.x)), y0 = Math.min(...ds.map(d => d.y)), x1 = Math.max(...ds.map(d => d.x + d.w)), y1 = Math.max(...ds.map(d => d.y + d.h));
       ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = lw; ctx.strokeRect(x0 - 3, y0 - 3, x1 - x0 + 6, y1 - y0 + 6); ctx.fillStyle = '#000'; ctx.font = `${11 / st.view.s}px system-ui`; ctx.fillText(cl.length + ' п.', x1 + 4, y0 + 10 / st.view.s); }
     for (const d of st.dets) { const s = st.samples[d.ti]; if (!s || !s.on || d.off) continue; ctx.strokeStyle = s.color; ctx.lineWidth = lw * 1.6; ctx.strokeRect(d.x, d.y, d.w, d.h); if (d.manual) { ctx.fillStyle = s.color; ctx.fillRect(d.x, d.y - 4 / st.view.s, 4 / st.view.s, 4 / st.view.s); } }
     // зоны помещений: цветная точка у значка
@@ -258,7 +290,7 @@
   });
   new ResizeObserver(() => draw()).observe(cv);
   /* ---------- результат ---------- */
-  function frameClusters() { const L = st.dets.filter(d => !d.off && st.samples[d.ti] && st.samples[d.ti].on && (st.mode !== 'eui' || st.samples[d.ti].vid)); return SYM.frames(L).map(cl => cl.map(i => st.dets.indexOf(L[i]))); }
+  function frameClusters() { const L = st.dets.filter(d => !d.off && st.samples[d.ti] && st.samples[d.ti].on && st.samples[d.ti].kind === 'eui' && st.samples[d.ti].vid); return SYM.frames(L).map(cl => cl.map(i => st.dets.indexOf(L[i]))); }
   const roomName = i => (i >= 0 && st.rooms[i] ? st.rooms[i].name : 'Весь объект');
   function counts() {
     const c = {}; // room → ti → n
@@ -289,26 +321,26 @@
   const finalN = (room, ti, auto) => { const m = st.manual[room + '|' + ti]; return m === '' || m == null ? auto : +m; };
   function results() {
     if (!st.dets.length && !Object.keys(st.manual).length) { $('#dOut').innerHTML = ''; return; }
-    const c = counts(), fr = st.mode === 'eui' ? frameCounts() : {}, rooms = [...new Set([...st.rooms.map(r => r.name), ...Object.keys(c)])].filter(r => c[r] || Object.keys(st.manual).some(k => k.startsWith(r + '|')));
+    const c = counts(), fr = st.samples.some(q => q.kind === 'eui') ? frameCounts() : {}, rooms = [...new Set([...st.rooms.map(r => r.name), ...Object.keys(c)])].filter(r => c[r] || Object.keys(st.manual).some(k => k.startsWith(r + '|')));
     const act = st.samples.map((s, i) => ({ s, i })).filter(o => o.s.on);
-    let h = `<div class="card"><h3>3. Количество по помещениям</h3><p class="mute" style="margin-top:0">Серое — найдено по значкам (авто). Впишите своё число, если распознано неверно; пустое поле — авто.</p><div class="scroll"><table class="t"><tr><th>Помещение</th>${act.map(o => `<th style="font-size:12px;max-width:110px"><span style="color:${o.s.color}">■</span> ${esc(o.s.label.slice(0, 40))}</th>`).join('')}${st.mode === 'eui' ? '<th style="font-size:12px">Рамки 1 / 2 / 3 / 4 / 5 постов</th>' : ''}</tr>`;
+    let h = `<div class="card"><h3>3. Количество по помещениям</h3><p class="mute" style="margin-top:0">Серое — найдено по значкам (авто). Впишите своё число, если распознано неверно; пустое поле — авто.</p><div class="scroll"><table class="t"><tr><th>Помещение</th>${act.map(o => `<th style="font-size:12px;max-width:110px"><span style="color:${o.s.color}">■</span> ${esc(o.s.label.slice(0, 40))}</th>`).join('')}${act.some(o => o.s.kind === 'eui') ? '<th style="font-size:12px">Рамки 1 / 2 / 3 / 4 / 5 постов</th>' : ''}</tr>`;
     const tot = {};
     for (const r of rooms) {
       h += `<tr><td>${esc(r)}</td>` + act.map(o => { const a = (c[r] || {})[o.i] || 0, m = st.manual[r + '|' + o.i]; tot[o.i] = (tot[o.i] || 0) + finalN(r, o.i, a);
         return `<td><input data-man="${esc(r)}|${o.i}" value="${m == null ? '' : m}" placeholder="${a}" style="width:46px"></td>`; }).join('');
-      if (st.mode === 'eui') { const f = (st.frameMan[r]) || fr[r] || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }; h += `<td style="white-space:nowrap">${[1, 2, 3, 4, 5].map(k => `<input data-fm="${esc(r)}|${k}" value="${st.frameMan[r] ? f[k] : ''}" placeholder="${(fr[r] || {})[k] || 0}" style="width:34px">`).join('')}</td>`; }
+      if (act.some(o => o.s.kind === 'eui')) { const f = (st.frameMan[r]) || fr[r] || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }; h += `<td style="white-space:nowrap">${[1, 2, 3, 4, 5].map(k => `<input data-fm="${esc(r)}|${k}" value="${st.frameMan[r] ? f[k] : ''}" placeholder="${(fr[r] || {})[k] || 0}" style="width:34px">`).join('')}</td>`; }
       h += '</tr>';
     }
-    h += `<tr><td><b>Итого</b></td>${act.map(o => `<td><b>${tot[o.i] || 0}</b>${o.s.qty != null ? `<span class="mute"> / ${o.s.qty}</span>` : ''}</td>`).join('')}${st.mode === 'eui' ? '<td></td>' : ''}</tr></table></div>`;
-    h += st.mode === 'eui'
-      ? `<p class="mute">${st.frameLbl && st.frameLbl.length ? `Рамки — группы значков вплотную; число постов — по подписи «Р-0N» рядом (подписей на плане: ${st.frameLbl.length}).${st.frameDiag && st.frameDiag.length ? ' Проверьте: ' + esc(st.frameDiag.slice(0, 8).join('; ')) + (st.frameDiag.length > 8 ? '…' : '') : ''}` : 'Рамки: значки, стоящие вплотную, считаются одной рамкой (число значков = число постов). Проверьте на плане — рамки обведены и подписаны «N п.».'}</p><div class="row"><button class="b" id="dToV">Передать в «ЭУИ Voltum»</button></div>`
-      : `<div class="row"><button class="b" id="dToP">Сделать рабочим вариантом</button><button class="b ghost" id="dToPadd">Добавить к рабочему варианту</button><span class="mute">Площади помещений — из экспликации; по ним считается освещённость.</span></div>`;
+    h += `<tr><td><b>Итого</b></td>${act.map(o => `<td><b>${tot[o.i] || 0}</b>${o.s.qty != null ? `<span class="mute"> / ${o.s.qty}</span>` : ''}</td>`).join('')}${act.some(o => o.s.kind === 'eui') ? '<td></td>' : ''}</tr></table></div>`;
+    const hasE = act.some(o => o.s.kind === 'eui'), hasL = act.some(o => o.s.kind === 'light');
+    h += (hasE ? `<p class="mute">${st.frameLbl && st.frameLbl.length ? `Рамки — группы значков вплотную; число постов — по подписи «Р-0N» рядом (подписей на плане: ${st.frameLbl.length}).${st.frameDiag && st.frameDiag.length ? ' Проверьте: ' + esc(st.frameDiag.slice(0, 8).join('; ')) + (st.frameDiag.length > 8 ? '…' : '') : ''}` : 'Рамки: значки, стоящие вплотную, считаются одной рамкой (число значков = число постов). Проверьте на плане — рамки обведены и подписаны «N п.».'}</p>` : '') +
+      `<div class="row">${hasE ? '<button class="b" id="dToV">Розетки и выключатели → «ЭУИ Voltum»</button>' : ''}${hasL ? '<button class="b" id="dToK">Светильники → «КП Maytoni»</button>' : ''}<span class="mute">Площади помещений — из экспликации; по ним считается освещённость.</span></div>`;
     $('#dOut').innerHTML = h + '</div>';
     $('#dOut').querySelectorAll('[data-man]').forEach(x => x.onchange = () => { const v = x.value.trim(); if (v === '') delete st.manual[x.dataset.man]; else st.manual[x.dataset.man] = Math.max(0, +v || 0); results(); });
     $('#dOut').querySelectorAll('[data-fm]').forEach(x => x.onchange = () => { const [r, k] = x.dataset.fm.split('|'); const base = st.frameMan[r] || Object.assign({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, fr[r] || {}); base[k] = Math.max(0, +x.value || 0); st.frameMan[r] = base; results(); });
     const toV = $('#dToV'); if (toV) toV.onclick = () => {
       const list = [];
-      for (const r of rooms) act.forEach(o => { const n = finalN(r, o.i, (c[r] || {})[o.i] || 0); if (n > 0) list.push({ room: r, type: o.s.label, qty: n, id: o.s.vid || '' }); });
+      for (const r of rooms) act.filter(o => o.s.kind === 'eui').forEach(o => { const n = finalN(r, o.i, (c[r] || {})[o.i] || 0); if (n > 0) list.push({ room: r, type: o.s.label, qty: n, id: o.s.vid || '' }); });
       const frames = {}; for (const r of rooms) frames[r] = st.frameMan[r] || fr[r] || null;
       VOLTUM.setRows(list, frames); showTab('eui'); MTUI.toast && MTUI.toast('Передано в «ЭУИ Voltum»: выберите серию и цвет и нажмите «Подобрать»');
     };
@@ -323,8 +355,13 @@
       else PROJECT.set(rr, rws, 'по чертежу');
       MTUI.toast && MTUI.toast('Проект и КП обновлены по чертежу');
     };
-    const p1 = $('#dToP'), p2 = $('#dToPadd'); if (p1) p1.onclick = () => toP(false); if (p2) p2.onclick = () => toP(true);
+    const tk = $('#dToK'); if (tk) tk.onclick = () => {
+      const L = act.filter(o => o.s.kind === 'light'), cnt = {};
+      for (const r of rooms) L.forEach((o, j) => { const n = finalN(r, o.i, (c[r] || {})[o.i] || 0); if (n > 0) (cnt[r] = cnt[r] || {})[j] = n; });
+      KPM.setFromDrawing(L.map(o => ({ label: o.s.label, a: o.s.a, why: o.s.why, manual: o.s.manualA })), cnt, rooms.map(r => { const R = st.rooms.find(x => x.name === r); return { name: r, S: R && R.S ? R.S : '' }; }));
+      showTab('kpm'); MTUI.toast && MTUI.toast('Светильники переданы в «КП Maytoni»');
+    };
   }
   window.addEventListener('tab-shown', e => { if (e.detail === 'drw') { if (st.cv && !st.view.s) fit(); draw(); } });
-  window.DRAWING = { st, results, autoRooms, frameInfo: () => frameCounts(), counts: () => counts() };
+  window.DRAWING = { addSampleRect: (label, r) => { const bb = SYM.cropIcon(st.ink, { x0: r[0], y0: r[1], x1: r[2], y1: r[3] }) || { x: r[0], y: r[1], w: r[2] - r[0], h: r[3] - r[1] }; const s = addSample(label, bb, null); drawSamples(); draw(); return s; }, st, results, autoRooms, frameInfo: () => frameCounts(), counts: () => counts() };
 })();

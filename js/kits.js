@@ -533,6 +533,6 @@
     return out;
   }
 
-  const KITS = { trackShape, trackFixture, STRIP_USE, pickTier, lentaCalc, trackSystems, trackCalc, daliCalc, kpRuleCheck, kpCompare, roomKit, wizard, explication, VARIANTS };
+  const KITS = { lampFor, decorFor, trackShape, trackFixture, STRIP_USE, pickTier, lentaCalc, trackSystems, trackCalc, daliCalc, kpRuleCheck, kpCompare, roomKit, wizard, explication, VARIANTS };
   if (typeof module !== 'undefined' && module.exports) module.exports = KITS; else root.KITS = KITS;
 })(typeof window !== 'undefined' ? window : globalThis);
