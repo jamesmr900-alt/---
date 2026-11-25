@@ -366,7 +366,7 @@
     if (!st.cv) { setMsg('Сначала откройте лист.'); return; }
     const btn = $('#dPdfOut'); btn.disabled = true; prog('Готовлю PDF…');
     try {
-      const W = st.cv.width, H = st.cv.height, c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+      const W = st.cv.width; let H = st.cv.height, c = document.createElement('canvas'); c.width = W; c.height = H; let x = c.getContext('2d');
       x.drawImage(st.cv, 0, 0); const lw = Math.max(2, W / 1400), fs = Math.max(14, W / 160);
       // значки — рамкой цвета позиции
       for (const d of st.dets) { const q = st.samples[d.ti]; if (!q || !q.on || d.off) continue; x.strokeStyle = q.color; x.lineWidth = lw * 1.6; x.strokeRect(d.x - 1, d.y - 1, d.w + 2, d.h + 2); }
@@ -376,10 +376,13 @@
       // легенда: позиции, количество, рамки
       const act = st.samples.map((q, i) => ({ q, i })).filter(o => o.q.on), cnt = i => st.dets.filter(d => d.ti === i && !d.off).length;
       const fc = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }; Object.values(st.samples.some(q => q.kind === 'eui') ? frameCounts() : {}).forEach(f => { for (const k in fc) fc[k] += f[k] || 0; });
-      const lines = act.map(o => ({ col: o.q.color, t: `${o.q.label.slice(0, 60)} — ${cnt(o.i)} шт` })).concat(Object.values(fc).some(Boolean) ? [1, 2, 3, 4, 5].filter(k => fc[k]).map(k => ({ col: FCOL[k], t: `Рамка на ${k} пост${k === 1 ? '' : k < 5 ? 'а' : 'ов'} — ${fc[k]} шт`, frame: true })) : []);
+      const lines = act.map(o => ({ col: o.q.color, t: o.q.seg > 0 ? `${o.q.label.slice(0, 60)} — ${(cnt(o.i) * o.q.seg).toFixed(1)} м` : `${o.q.label.slice(0, 60)} — ${cnt(o.i)} шт` })).concat(Object.values(fc).some(Boolean) ? [1, 2, 3, 4, 5].filter(k => fc[k]).map(k => ({ col: FCOL[k], t: `Рамка на ${k} пост${k === 1 ? '' : k < 5 ? 'а' : 'ов'} — ${fc[k]} шт`, frame: true })) : []);
       x.font = `${fs}px system-ui, sans-serif`; const bw = Math.max(...lines.map(l => x.measureText(l.t).width), x.measureText('Найдено по чертежу').width) + fs * 3, bh = (lines.length + 1.6) * fs * 1.35;
+      if (st.dwg) { // DWG: легенда — полосой над чертежом, чтобы не закрывать план
+        const c2 = document.createElement('canvas'); c2.width = W; c2.height = H + bh + fs * 2; const x2 = c2.getContext('2d'); x2.fillStyle = '#fff'; x2.fillRect(0, 0, W, c2.height); x2.drawImage(c, 0, bh + fs * 2);
+        c = c2; x = x2; H = c2.height; x.font = `${fs}px system-ui, sans-serif`; }
       const bx = fs, by = fs; x.fillStyle = 'rgba(255,255,255,.93)'; x.fillRect(bx, by, bw, bh); x.strokeStyle = '#333'; x.lineWidth = lw; x.strokeRect(bx, by, bw, bh);
-      x.fillStyle = '#000'; x.font = `bold ${fs}px system-ui, sans-serif`; x.fillText(`Найдено по чертежу · лист ${st.page}`, bx + fs * 0.6, by + fs * 1.3); x.font = `${fs}px system-ui, sans-serif`;
+      x.fillStyle = '#000'; x.font = `bold ${fs}px system-ui, sans-serif`; x.fillText(st.dwg ? `Найдено по чертежу · ${st.dwg.name}` : `Найдено по чертежу · лист ${st.page}`, bx + fs * 0.6, by + fs * 1.3); x.font = `${fs}px system-ui, sans-serif`;
       lines.forEach((l, k) => { const yy = by + fs * 1.3 + (k + 1) * fs * 1.35; x.strokeStyle = l.col; x.lineWidth = lw * (l.frame ? 2.2 : 1.6); x.strokeRect(bx + fs * 0.6, yy - fs * 0.8, fs * 1.2, fs * 0.9); x.fillStyle = '#000'; x.fillText(l.t, bx + fs * 2.2, yy); });
       if (!window.jspdf) await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = (window.DOC_VENDOR && DOC_VENDOR.jspdf) || 'vendor/jspdf.umd.min.js'; sc.onload = ok; sc.onerror = () => no(new Error('не загрузился jsPDF')); document.head.appendChild(sc); });
       const vp = st.dwg ? { width: W / SC, height: H / SC } : (await st.doc.getPage(st.page)).getViewport({ scale: 1 }), mm = v => v * 25.4 / 72, pw = mm(vp.width), ph = mm(vp.height);

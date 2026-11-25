@@ -159,8 +159,8 @@
     F.texts.forEach(t => { xs.push(t.x); ys.push(t.y); }); F.fills.forEach(f => f.p.forEach(p => { xs.push(p[0]); ys.push(p[1]); }));
     if (!xs.length) return null; xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
     const q = (A, f) => A[Math.min(A.length - 1, Math.max(0, Math.floor(A.length * f)))];
-    // ядро рисунка — без 1 % крайних точек; в кадр — всё, что не дальше полутора размеров ядра (таблицы, легенда), далёкий мусор — нет
-    const cx0 = q(xs, 0.01), cx1 = q(xs, 0.99), cy0 = q(ys, 0.01), cy1 = q(ys, 0.99), S = Math.max(cx1 - cx0, cy1 - cy0, 1e-6) * 1.5;
+    // ядро рисунка — без 1 % крайних точек; в кадр — всё, что не дальше четырёх размеров ядра (таблицы, легенда), далёкий мусор — нет
+    const cx0 = q(xs, 0.01), cx1 = q(xs, 0.99), cy0 = q(ys, 0.01), cy1 = q(ys, 0.99), S = Math.max(cx1 - cx0, cy1 - cy0, 1e-6) * 4;
     const fx = xs.filter(x => x >= cx0 - S && x <= cx1 + S), fy = ys.filter(y => y >= cy0 - S && y <= cy1 + S);
     const x0 = fx[0], x1 = fx[fx.length - 1], y0 = fy[0], y1 = fy[fy.length - 1], m = Math.max(x1 - x0, y1 - y0) * 0.015;
     return { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m };
@@ -169,7 +169,7 @@
   /** Подготовка чертежа: развёртка и кадр. maxPx — длинная сторона картинки при масштабе 1. */
   D.prepare = (db, name) => {
     const F = D.flatten(db), ext = extents(F); if (!ext) throw new Error('в модели чертежа нет объектов');
-    const W = ext.x1 - ext.x0, H = ext.y1 - ext.y0, k = Math.min(4800 / W, 4800 / H, Math.sqrt(1.8e7 / (W * H)));
+    const W = ext.x1 - ext.x0, H = ext.y1 - ext.y0, k = Math.min(7000 / W, 7000 / H, Math.sqrt(2.2e7 / (W * H)));
     return { db, F, ext, k, name };
   };
   /** Мировые координаты → пиксели картинки (масштаб s относительно базового). */
