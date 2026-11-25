@@ -64,11 +64,18 @@
         // ячейка значка: колонка «УО / Усл. об. / 2D-символ» (слева или справа от подписи), иначе — слева от подписи
         let left = uo ? uo.x - it.h * 0.6 : it.x - it.h * 4.2, right = it.x - it.h * 0.25;
         if (uo && uo.x > it.x + it.h) { left = uo.x - it.h * 1.2; right = uo.x + Math.max(uo.w, it.h * 3) + it.h * 1.2; }
-        rows.push({ label: label.replace(/\s+/g, ' ').trim(), qty, x: it.x, y: it.y, h: it.h, icon: { x0: left, x1: right, y0: it.y - it.h * 1.25, y1: it.y + it.h * 0.45 } });
+        // продолжение подписи на следующих строках («300 ММ ОТ ЧИСТОГО ПОЛА») — та же позиция, другая высота / вид
+        let yb = it.y;
+        for (let g = 0; g < 3; g++) { const nx = items.filter(o => o !== it && o.y > yb + it.h * 0.5 && o.y < yb + it.h * 1.9 && Math.abs(o.x - it.x) < it.h * 1.2 && (!qh || o.x < rightLim) && !TYPE_RX.test(o.s) && !/^\d{1,4}$/.test(o.s)).sort((a, b) => a.y - b.y)[0];
+          if (!nx) break; const same = items.filter(o => Math.abs(o.y - nx.y) < it.h * 0.35 && o.x >= nx.x && o.x < (qh ? rightLim : nx.x + W * 0.2) && !/^\d{1,4}$/.test(o.s)).sort((a, b) => a.x - b.x);
+          label += ' ' + same.map(o => o.s).join(' '); yb = nx.y; }
+        rows.push({ label: label.replace(/\s+/g, ' ').trim(), qty, x: it.x, y: it.y, yb, h: it.h, icon: { x0: left, x1: right, y0: it.y - it.h * 1.25, y1: yb + it.h * 0.45 } });
         break;
       }
     }
-    if (rows.length > 1) { const ys = rows.map(r => r.y).sort((a, b) => a - b), dd = ys.slice(1).map((y, i) => y - ys[i]).filter(d => d > 2).sort((a, b) => a - b), pitch = dd[dd.length >> 1]; if (isFinite(pitch)) rows.forEach(r => { r.icon.y0 = r.y - pitch * 0.72; r.icon.y1 = r.y + pitch * 0.22; }); }
+    // окно значка по высоте — между серединами соседних строк (значок стоит по центру блока подписи, а подпись бывает в 2–3 строки)
+    if (rows.length > 1) { rows.sort((a, b) => a.y - b.y); const cy = r => (r.y - r.h * 0.85 + r.yb + r.h * 0.15) / 2, cs = rows.map(cy), dd = cs.slice(1).map((c, i) => c - cs[i]).filter(d => d > 2).sort((a, b) => a - b), pitch = dd[dd.length >> 1];
+      if (isFinite(pitch)) rows.forEach((r, i) => { const up = i ? (cs[i] - cs[i - 1]) / 2 : pitch / 2, dn = i < rows.length - 1 ? (cs[i + 1] - cs[i]) / 2 : pitch / 2; r.icon.y0 = cs[i] - Math.min(up, pitch * 0.75); r.icon.y1 = cs[i] + Math.min(dn, pitch * 0.75); }); }
     const lx = Math.min(...rows.map(r => Math.min(r.x, r.icon.x0)), head ? head.x : 1e9, uo ? uo.x : 1e9);
     return { rows, head, qh, panelX: head ? Math.min(head.x - W * 0.02, (isFinite(lx) ? lx : head.x) - W * 0.01) : null };
   };
@@ -424,11 +431,11 @@
     for (let y = bb.y; y < bb.y + bb.h; y++) for (let x = bb.x; x < bb.x + bb.w; x++) { const k = (y * W + x) * 4, r = rgb[k], g = rgb[k + 1], b = rgb[k + 2]; if (Math.max(r, g, b) - Math.min(r, g, b) < 60) continue; n++; const key = (r >> 4) + ',' + (g >> 4) + ',' + (b >> 4); h.set(key, (h.get(key) || 0) + 1); }
     if (n < 6) return null; let bk = null, bc = 0; for (const [k, c] of h) if (c > bc) { bc = c; bk = k; } return bk.split(',').map(v => +v * 16 + 8); };
   /** Цвет значка для поиска: если значок — цветная рамка/заливка с рисунком другого цвета внутри (розетка в розовой рамке), ищем рисунок. */
-  S.glyphColor = (rgb, W, bb) => {
+  S.glyphColor = (rgb, W, bb, satMin = 50) => {
     const h = new Map();
-    for (let y = bb.y; y < bb.y + bb.h; y++) for (let x = bb.x; x < bb.x + bb.w; x++) { const k = (y * W + x) * 4, r = rgb[k], g = rgb[k + 1], b = rgb[k + 2]; if (Math.max(r, g, b) - Math.min(r, g, b) < 50) continue; const key = (r >> 4) + ',' + (g >> 4) + ',' + (b >> 4); const e = h.get(key) || { n: 0, c: [r & 0xF0 | 8, g & 0xF0 | 8, b & 0xF0 | 8] }; e.n++; h.set(key, e); }
+    for (let y = bb.y; y < bb.y + bb.h; y++) for (let x = bb.x; x < bb.x + bb.w; x++) { const k = (y * W + x) * 4, r = rgb[k], g = rgb[k + 1], b = rgb[k + 2]; if (Math.max(r, g, b) - Math.min(r, g, b) < satMin) continue; const key = (r >> 4) + ',' + (g >> 4) + ',' + (b >> 4); const e = h.get(key) || { n: 0, c: [r & 0xF0 | 8, g & 0xF0 | 8, b & 0xF0 | 8] }; e.n++; h.set(key, e); }
     const cl = []; for (const e of [...h.values()].sort((a, b) => b.n - a.n)) { const m = cl.find(c => Math.max(...c.c.map((v, i) => Math.abs(v - e.c[i]))) < 48); if (m) m.n += e.n; else cl.push({ c: e.c, n: e.n }); }
-    if (!cl.length || cl[0].n < 6) return null;
+    if (!cl.length || cl[0].n < 6) return satMin > 24 ? S.glyphColor(rgb, W, bb, 24) : null;   // бледный цветной значок (сиреневый) — по мягкому порогу
     const lum = c => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2], area = bb.w * bb.h;
     let pick = cl[0];
     if (cl[0].n > area * 0.3) { const g2 = cl.slice(1).find(c => c.n >= 12 && lum(c.c) < lum(cl[0].c) - 30); if (g2) pick = g2; }
@@ -451,13 +458,31 @@
     x0 = Math.max(0, x0 - 1); y0 = Math.max(0, y0 - 1); x1 = Math.min(m.w - 1, x1 + 1); y1 = Math.min(m.h - 1, y1 + 1);
     const w = x1 - x0 + 1, h = y1 - y0 + 1, g = new Float32Array(w * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) g[y * w + x] = at(x + x0, y + y0); return { g, w, h, dx: x0, dy: y0 };
   };
+  /** Толщина цветных пятен без тонких линий: маска → эрозия (радиус 2) → связные области → меньшая сторона.
+   *  Возвращает массив меньших сторон (вернув толщину, снятую эрозией). Нужна, чтобы оценить масштаб значков плана относительно образца. */
+  S.blobSides = (m, box, ex) => {
+    const x0 = box ? Math.max(2, Math.floor(box.x0)) : 2, y0 = box ? Math.max(2, Math.floor(box.y0)) : 2, x1 = box ? Math.min(m.w - 3, Math.ceil(box.x1)) : m.w - 3, y1 = box ? Math.min(m.h - 3, Math.ceil(box.y1)) : m.h - 3;
+    const w = x1 - x0 + 1, h = y1 - y0 + 1; if (w < 3 || h < 3) return [];
+    const on = (x, y) => m.g[y * m.w + x] > 0.5, er = new Uint8Array(w * h);
+    // эрозия крестом радиуса 2 (быстро и достаточно, чтобы убрать линии толщиной до 4 px)
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const X = x + x0, Y = y + y0; if (on(X, Y) && on(X - 2, Y) && on(X + 2, Y) && on(X, Y - 2) && on(X, Y + 2) && on(X - 1, Y - 1) && on(X + 1, Y + 1) && on(X - 1, Y + 1) && on(X + 1, Y - 1)) er[y * w + x] = 1; }
+    const lab = new Uint8Array(w * h), q = new Int32Array(w * h), out = [];
+    for (let s0 = 0; s0 < w * h; s0++) { if (!er[s0] || lab[s0]) continue; let qh = 0, qt = 0, a = 0, bx0 = 1e9, by0 = 1e9, bx1 = -1, by1 = -1; q[qt++] = s0; lab[s0] = 1;
+      while (qh < qt) { const c = q[qh++], x = c % w, y = (c - x) / w; a++; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y;
+        if (x > 0 && er[c - 1] && !lab[c - 1]) { lab[c - 1] = 1; q[qt++] = c - 1; } if (x < w - 1 && er[c + 1] && !lab[c + 1]) { lab[c + 1] = 1; q[qt++] = c + 1; }
+        if (y > 0 && er[c - w] && !lab[c - w]) { lab[c - w] = 1; q[qt++] = c - w; } if (y < h - 1 && er[c + w] && !lab[c + w]) { lab[c + w] = 1; q[qt++] = c + w; } }
+      const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1, cx = bx0 + x0 + bw / 2, cy = by0 + y0 + bh / 2;
+      if (a < 6 || (ex && ex.some(e => cx > e.x0 && cx < e.x1 && cy > e.y0 && cy < e.y1))) continue;
+      out.push({ s: Math.min(bw, bh) + 4, l: Math.max(bw, bh) + 4, a, x0: bx0 + x0 - 2, y0: by0 + y0 - 2, x1: bx1 + x0 + 3, y1: by1 + y0 + 3 }); }
+    return out;
+  };
   /** «Чернила» по цвету: 1 — пиксель того же цвета, 0 — другой (линии другого цвета, текст, штриховка не мешают). */
   S.colorInk = (rgb, W, H, col, box) => { const x0 = box ? box.x : 0, y0 = box ? box.y : 0, w = box ? box.w : W, h = box ? box.h : H, g = new Float32Array(w * h);
     const sat = Math.max(...col) - Math.min(...col);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const k = ((y + y0) * W + x + x0) * 4, r = rgb[k], gg = rgb[k + 1], b = rgb[k + 2];
       const d = Math.max(Math.abs(r - col[0]), Math.abs(gg - col[1]), Math.abs(b - col[2])), s2 = Math.max(r, gg, b) - Math.min(r, gg, b);
       // сглаженные края — частичное совпадение: оттенок тот же, насыщенность меньше
-      let v = d < 40 ? 1 : 0; if (!v && sat > 60 && s2 > 25) { const hue = (c) => Math.atan2(Math.sqrt(3) * (c[1] - c[2]), 2 * c[0] - c[1] - c[2]); const dh = Math.abs(hue([r, gg, b]) - hue(col)); if (Math.min(dh, 2 * Math.PI - dh) < 0.35) v = Math.min(1, s2 / sat); }
+      let v = d < 40 && !(sat >= 20 && sat < 60 && s2 < sat * 0.5) ? 1 : 0;   // бледный цвет (сиреневый) не путать с серыми линиями плана if (!v && sat > 60 && s2 > 25) { const hue = (c) => Math.atan2(Math.sqrt(3) * (c[1] - c[2]), 2 * c[0] - c[1] - c[2]); const dh = Math.abs(hue([r, gg, b]) - hue(col)); if (Math.min(dh, 2 * Math.PI - dh) < 0.35) v = Math.min(1, s2 / sat); }
       g[y * w + x] = v; }
     return { g, w, h };
   };

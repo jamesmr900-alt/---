@@ -23,6 +23,8 @@
       <b>Инструмент:</b>
       <button class="b sm" data-tool="pan" title="Перетаскивание листа, колесо — масштаб">✋ просмотр</button>
       <button class="b ghost sm" data-tool="sample" title="Обведите рамкой один значок — он станет образцом">▭ образец</button>
+      <button class="b ghost sm" data-tool="more" title="Обведите ещё один значок той же позиции (выбранной в списке образцов) — он станет дополнительным образцом; затем «Найти ещё»">⊕ ещё образец</button>
+      <button class="b ghost sm" data-tool="frame" title="Обведите рамкой значки ЭУИ, которые стоят в одной рамке (или один значок): рамка пересчитается на нужное число постов, прежние рамки этих значков уберутся">▣ рамка ЭУИ</button>
       <button class="b ghost sm" data-tool="add" title="Щелчок — добавить значок выбранного образца (если не нашёлся)">＋ значок</button>
       <button class="b ghost sm" data-tool="del" title="Щелчок по найденному значку — удалить (ложное срабатывание)">✕ значок</button>
       <button class="b ghost sm" data-tool="room" title="Щелчок — поставить метку выбранного помещения">⌖ помещение</button>
@@ -32,6 +34,8 @@
       <span style="flex:1"></span>
       <label style="flex-direction:row;align-items:center;gap:4px">точность <input type="range" id="dThr" min="0.5" max="0.95" step="0.01" value="0.72" style="width:110px;padding:0"><span id="dThrV">0.72</span></label>
       <button class="b" id="dFind">Найти значки</button>
+      <button class="b ghost sm" id="dMore" title="Искать по дополнительным образцам выбранной позиции и добавить к уже найденному (ничего не сбрасывает)">Найти ещё</button>
+      <button class="b ghost sm" id="dPdfOut" title="Скачать лист с отметками найденных значков и рамок ЭУИ">⬇ PDF с разметкой</button>
       <button class="b ghost sm" id="dZoomFit">⤢</button>
     </div>
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:10px">
@@ -120,7 +124,7 @@
   function addSample(label, bb, qty) {
     const i = st.samples.length, c = SYM.cut(st.ink, bb);
     const fr = /рамк/i.test(label) ? +((label.match(/(\d)\s*-?\s*пост/i) || label.match(/(\d)/) || [])[1] || 0) : 0;
-    const s = { label, bb, qty, g: c.g, w: c.w, h: c.h, color: COLORS[i % COLORS.length], on: !fr, frame: fr || 0 };
+    const s = { label, bb, qty, g: c.g, w: c.w, h: c.h, color: COLORS[i % COLORS.length], on: !fr, frame: fr || 0, extra: [] };
     classify(s);
     st.samples.push(s); return s;
   }
@@ -186,10 +190,13 @@
       return `<div style="border-top:1px solid var(--line);padding:4px 0;${i === st.selSample ? 'background:#f2f7ff' : ''}" data-ss="${i}">
         <div class="row" style="gap:5px;align-items:center"><input type="checkbox" data-son="${i}" ${s.on ? 'checked' : ''} style="width:auto"><canvas data-th="${i}" width="40" height="28" style="border:2px solid ${s.color};border-radius:4px;background:#fff"></canvas>
         <input data-sl="${i}" value="${esc(s.label)}" style="flex:1;font-size:12px"><button class="b ghost sm" data-sx="${i}" title="удалить образец">✕</button></div>
+        ${(s.extra || []).length ? `<div style="margin:2px 0 0 24px;font-size:11px" class="mute">ещё образцы: ${s.extra.map((e, k) => `<canvas data-ex="${i}:${k}" width="28" height="20" style="border:1px solid ${s.color};border-radius:3px;vertical-align:middle;background:#fff"></canvas><a href="#" data-exd="${i}:${k}" title="убрать этот образец" style="font-size:11px">✕</a>`).join(' ')}</div>` : ''}
         <div style="font-size:12px;margin:2px 0 0 24px">найдено <b>${found}</b>${s.qty != null ? ` из ${s.qty} по экспликации${found !== s.qty && st.dets.length ? ` <span style="color:#c0392b">(${found > s.qty ? '+' : ''}${found - s.qty})</span>` : ''}` : ''}</div>
         <div style="margin:2px 0 0 24px">${map}</div></div>`;
     }).join('');
     st.samples.forEach((s, i) => { const c = b.querySelector(`[data-th="${i}"]`).getContext('2d'), k = Math.min(40 / s.w, 28 / s.h); c.drawImage(st.cv, s.bb.x, s.bb.y, s.bb.w, s.bb.h, (40 - s.w * k) / 2, (28 - s.h * k) / 2, s.w * k, s.h * k); });
+    b.querySelectorAll('[data-ex]').forEach(x => { const [i, k] = x.dataset.ex.split(':').map(Number), e = st.samples[i].extra[k], c = x.getContext('2d'), q = Math.min(28 / e.bb.w, 20 / e.bb.h); c.drawImage(st.cv, e.bb.x, e.bb.y, e.bb.w, e.bb.h, (28 - e.bb.w * q) / 2, (20 - e.bb.h * q) / 2, e.bb.w * q, e.bb.h * q); });
+    b.querySelectorAll('[data-exd]').forEach(x => x.onclick = e => { e.preventDefault(); const [i, k] = x.dataset.exd.split(':').map(Number); st.samples[i].extra.splice(k, 1); drawSamples(); });
     b.querySelectorAll('[data-ss]').forEach(x => x.onclick = e => { if (e.target.closest('input,select,button')) return; st.selSample = +x.dataset.ss; drawSamples(); });
     b.querySelectorAll('[data-son]').forEach(x => x.onchange = () => { st.samples[+x.dataset.son].on = x.checked; draw(); results(); });
     b.querySelectorAll('[data-sl]').forEach(x => x.onchange = () => { const q = st.samples[+x.dataset.sl]; q.label = x.value; const fr = /рамк/i.test(q.label) ? +((q.label.match(/(\d)\s*-?\s*пост/i) || q.label.match(/(\d)/) || [])[1] || 0) : 0; q.frame = fr; if (!q.manualA) classify(q); drawSamples(); results(); });
@@ -200,43 +207,116 @@
   }
   /* ---------- поиск ---------- */
   $('#dThr').oninput = e => { $('#dThrV').textContent = e.target.value; };
+  /** Шаблоны поиска позиции: основной образец и дополнительные (тот же значок, нарисованный чуть иначе). */
+  const tplsOf = (s, i, onlyNew) => [...(onlyNew ? [] : [{ s, i }]), ...(s.extra || []).filter(e => !onlyNew || !e.used).map(e => ({ s: Object.assign({}, e, { label: s.label }), i, ex: e }))];
+  const near = (a, b) => { const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)), iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)), I = ix * iy, U = a.w * a.h + b.w * b.h - I;
+    // тот же значок (повёрнутый под углом находится дважды со сдвигом) — центры ближе ~¾ размера; соседние значки вплотную — дальше
+    return I / U > 0.3 || Math.hypot(a.x + a.w / 2 - b.x - b.w / 2, a.y + a.h / 2 - b.y - b.h / 2) < (Math.max(a.w, a.h) + Math.max(b.w, b.h)) / 2 * 0.77; };
+  /** Поиск по списку шаблонов {s, i}; append — добавить к найденному, ничего не сбрасывая. */
+  async function runFind(act, append) {
+    st.rgb = st.rgb || SYM.rgbOf(st.cv);
+    let byC = SYM.findByColor(st.rgb, st.cv.width, st.cv.height, st.ink, act.map(o => o.s), st.region);
+    const k = byC.size && byC.tplSize ? (byC.size + 2) / (byC.tplSize + 2) : 1;
+    if (SYM.cfg.rescale !== false && Math.abs(k - 1) > 0.08 && k > 0.3 && k < 3) {
+      prog('Уточняю образцы…');
+      const cv2 = await SYM.render(st.doc, st.page, SC * k), ink2 = SYM.ink(cv2), rgb2 = SYM.rgbOf(cv2);
+      const bbs = act.map(o => { const b = o.s.bb, m = 3; return SYM.cropIcon(ink2, { x0: b.x * k - m, x1: (b.x + b.w) * k + m, y0: b.y * k - m, y1: (b.y + b.h) * k + m }) || { x: Math.round(b.x * k), y: Math.round(b.y * k), w: Math.max(4, Math.round(b.w * k)), h: Math.max(4, Math.round(b.h * k)) }; });
+      st._tpl = { cv2, bbs, k }; byC = SYM.findByColor(st.rgb, st.cv.width, st.cv.height, st.ink, act.map(o => o.s), st.region, { rgb: rgb2, W: cv2.width, ink: ink2, bbs });
+    }
+    if (!append) st.symSize = [byC.size, byC.tplSize, st._tpl ? st._tpl.k : 1];
+    let found = byC.found.map(d => Object.assign(d, { ti: act[d.ti].i }));
+    const rest = byC.noColor.map(k => act[k]);
+    // цветные значки без контура — по цветовой маске (4 поворота); чёрно-белые — по рисунку
+    const byCol = new Map(), bw = [];
+    rest.forEach(o => { const gc = SYM.glyphColor(st.rgb, st.cv.width, o.s.bb); if (!gc) { bw.push(o); return; } o.gbb = gc.bb; const c = gc.c, key = c.map(v => v >> 5).join(','); if (!byCol.has(key)) byCol.set(key, { c, list: [] }); byCol.get(key).list.push(o); });
+    const addF = (f2, list) => f2.forEach(d => { d.ti = list[d.ti].i; d.grp = 'm' + d.ti + '#' + (d.r || 0); if (!found.some(o => near(o, d))) found.push(d); });
+    // масштаб значков плана для каждого цвета: толщина цветных пятен на плане против толщины пятна в образце (в таблице значки часто крупнее)
+    const groups = [...byCol.values()].map(({ c, list }) => {
+      const mi = SYM.colorInk(st.rgb, st.cv.width, st.cv.height, c), tpl = list.map(o => { const m = SYM.colorInk(st.rgb, st.cv.width, st.cv.height, c, o.gbb || o.s.bb); return SYM.trimFrame(m) || m; });
+      const ts = tpl.map(m => { const b = SYM.blobSides(m); return b.length ? b.sort((p, q) => q.a - p.a)[0].s : 0; }).filter(Boolean), t0 = ts.length ? ts.sort((p, q) => p - q)[ts.length >> 1] : 0;
+      const ps = t0 ? SYM.blobSides(mi, st.region, st.exclude).map(b => b.s).filter(v => v >= 5 && v <= t0 * 1.6) : []; let kk = null;
+      if (ps.length >= 3) { const hist = {}; ps.forEach(v => { hist[v] = (hist[v] || 0) + 1; }); let mode = 0, best = 0; for (const k in hist) { const cc = hist[k] + (hist[+k - 1] || 0) * 0.5 + (hist[+k + 1] || 0) * 0.5; if (cc > best) { best = cc; mode = +k; } } kk = mode / t0; }
+      return { c, list, mi, tpl, kk, n: ps.length }; });
+    const ks = groups.map(g => g.kk).filter(v => v != null).sort((a, b) => a - b), kMed = ks.length ? ks[ks.length >> 1] : null;
+    st._scaleDbg = groups.map(g => [g.c.join(','), g.kk && +g.kk.toFixed(2), g.n]);
+    let gi = 0; for (const { c, list, mi, tpl, kk: k0 } of groups) {
+      prog(`Ищу цветные значки… ${++gi}/${groups.length}`);
+      const kk = k0 != null ? k0 : kMed;   // мало пятен этого цвета — масштаб как у остальных значков листа
+      const scales = kk != null && (kk < 0.85 || kk > 1.18) ? [kk * 0.86, kk * 0.93, kk, kk * 1.08, kk * 1.16].filter(v => v > 0.25 && v < 2) : null;
+      const keepSc = SYM.scales; if (scales) SYM.scales = scales.concat([0.86, 0.93, 1]);
+      let f2; try { f2 = await SYM.find(mi, tpl, Math.max(0.6, +$('#dThr').value - 0.08), st.region, p => prog(`Ищу цветные значки… ${gi}/${groups.length}: ${Math.round(p * 100)}%`)); } finally { SYM.scales = keepSc; }
+      // у значка цвета в рамке примерно столько же, сколько в образце; кусок цветной линии (штрихпунктир) — заметно меньше
+      { const dens = (m, x0, y0, w, h) => { let sum = 0, n = 0; for (let y = Math.max(0, y0); y < Math.min(m.h, y0 + h); y++) for (let x = Math.max(0, x0); x < Math.min(m.w, x0 + w); x++) { sum += m.g[y * m.w + x]; n++; } return n ? sum / n : 0; };
+        const td = tpl.map(m => dens(m, 0, 0, m.w, m.h));
+        f2 = f2.filter(d => dens(mi, d.x, d.y, d.w, d.h) >= td[d.ti] * 0.6); }
+      // одно цветное пятно — столько значков, сколько в нём помещается по длине (точка — один, блок из двух розеток — два)
+      { const tl = tpl.map(m => { const b = SYM.blobSides(m); return b.length ? b.sort((p, q) => q.a - p.a)[0].l : 0; }), k = kk || 1;
+        const cores = SYM.blobSides(mi, st.region, st.exclude), own = new Map();
+        f2.forEach(d => { let bi = -1, bo = 0; cores.forEach((c, ci) => { const ox = Math.min(d.x + d.w, c.x1) - Math.max(d.x, c.x0), oy = Math.min(d.y + d.h, c.y1) - Math.max(d.y, c.y0); if (ox > 0 && oy > 0 && ox * oy > bo) { bo = ox * oy; bi = ci; } }); if (bi >= 0) { if (!own.has(bi)) own.set(bi, []); own.get(bi).push(d); } });
+        const drop = new Set(); own.forEach((ds, ci) => { const L = tl[ds[0].ti] * k, n = L > 4 ? Math.max(1, Math.round(cores[ci].l / L)) : ds.length; if (ds.length > n) ds.sort((a, b) => b.c - a.c).slice(n).forEach(d => drop.add(d)); });
+        f2 = f2.filter(d => !drop.has(d)); }
+      addF(f2, list);
+    }
+    if (bw.length) { const f2 = await SYM.find(st.ink, bw.map(o => o.s), +$('#dThr').value, st.region, p => prog(`Ищу значки… ${Math.round(p * 100)}%`)); addF(f2, bw); }
+    // один значок — одна отметка: перекрывающиеся оставить лучший (соседние значки вплотную — разные)
+    found.sort((a, b) => (b.c || 0) - (a.c || 0)); { const keep = []; for (const d of found) if (!keep.some(o => near(o, d))) keep.push(d); found = keep; }
+    const allS = st.samples.flatMap(s => [s.bb, ...(s.extra || []).map(e => e.bb)]);
+    found = found.filter(d => !(st.exclude || []).some(e => d.x + d.w / 2 > e.x0 && d.x + d.w / 2 < e.x1 && d.y + d.h / 2 > e.y0 && d.y + d.h / 2 < e.y1)).filter(d => !st.samples.some(s => d.x < s.bb.x + s.bb.w && d.x + d.w > s.bb.x && d.y < s.bb.y + s.bb.h && d.y + d.h > s.bb.y));
+    if (!append) { st.dets = found; st.rejected = []; }
+    else { // добавить только новое: не там, где уже есть значок, и не там, где значок удалён вручную
+      found = found.filter(d => !st.dets.some(o => near(o, d)) && !(st.rejected || []).some(o => near(o, d)));
+      if (found.length > Math.max(150, st.dets.length * 1.5)) throw new Error(`по новому образцу нашлось ${found.length} совпадений — он похож на линии плана, а не на значок. Уберите этот образец (✕ у миниатюры) и обведите значок плотнее, без соседних линий`);
+      found.forEach(d => { d.added = true; }); st.dets.push(...found); }
+    assignRooms(); return found.length;
+  }
   $('#dFind').onclick = async () => {
-    const act = st.samples.map((s, i) => ({ s, i })).filter(o => o.s.on);
+    const act = st.samples.map((s, i) => ({ s, i })).filter(o => o.s.on).flatMap(o => tplsOf(o.s, o.i));
     if (!act.length) { setMsg('Нет образцов для поиска.'); return; }
     $('#dFind').disabled = true; prog('Ищу значки… 0%');
-    try {
-      st.rgb = st.rgb || SYM.rgbOf(st.cv);
-      let byC = SYM.findByColor(st.rgb, st.cv.width, st.cv.height, st.ink, act.map(o => o.s), st.region);
-      // значки на плане мельче/крупнее, чем в таблице: перерисовать лист в их масштабе и взять образцы оттуда
-      const k = byC.size && byC.tplSize ? (byC.size + 2) / (byC.tplSize + 2) : 1;
-      if (SYM.cfg.rescale !== false && Math.abs(k - 1) > 0.08 && k > 0.3 && k < 3) {
-        prog('Уточняю образцы…');
-        const cv2 = await SYM.render(st.doc, st.page, SC * k), ink2 = SYM.ink(cv2), rgb2 = SYM.rgbOf(cv2);
-        const bbs = act.map(o => { const b = o.s.bb, m = 3; return SYM.cropIcon(ink2, { x0: b.x * k - m, x1: (b.x + b.w) * k + m, y0: b.y * k - m, y1: (b.y + b.h) * k + m }) || { x: Math.round(b.x * k), y: Math.round(b.y * k), w: Math.max(4, Math.round(b.w * k)), h: Math.max(4, Math.round(b.h * k)) }; });
-        st._tpl = { cv2, bbs, k }; byC = SYM.findByColor(st.rgb, st.cv.width, st.cv.height, st.ink, act.map(o => o.s), st.region, { rgb: rgb2, W: cv2.width, ink: ink2, bbs });
-      }
-      st.symSize = [byC.size, byC.tplSize, st._tpl ? st._tpl.k : 1]; let found = byC.found.map(d => Object.assign(d, { ti: act[d.ti].i }));
-      const rest = byC.noColor.map(k => act[k]);
-      // цветные значки без контура (точки, кружки, контурные значки цветом) — по цветовой маске; чёрно-белые — по рисунку
-      const byCol = new Map(), bw = [];
-      rest.forEach(o => { const gc = SYM.glyphColor(st.rgb, st.cv.width, o.s.bb); if (!gc) { bw.push(o); return; } o.gbb = gc.bb; const c = gc.c, key = c.map(v => v >> 5).join(','); if (!byCol.has(key)) byCol.set(key, { c, list: [] }); byCol.get(key).list.push(o); });
-      const addF = (f2, list) => f2.forEach(d => { d.ti = list[d.ti].i; d.grp = 'm' + d.ti + '#' + (d.r || 0); if (!found.some(o => Math.abs(o.x + o.w / 2 - d.x - d.w / 2) < Math.min(o.w, d.w) * 0.6 && Math.abs(o.y + o.h / 2 - d.y - d.h / 2) < Math.min(o.h, d.h) * 0.6)) found.push(d); });
-      let gi = 0; for (const { c, list } of byCol.values()) {
-        prog(`Ищу цветные значки… ${++gi}/${byCol.size}`);
-        const mi = SYM.colorInk(st.rgb, st.cv.width, st.cv.height, c);
-        const tpl = list.map(o => { const m = SYM.colorInk(st.rgb, st.cv.width, st.cv.height, c, o.gbb || o.s.bb); return SYM.trimFrame(m) || m; });
-        const f2 = await SYM.find(mi, tpl, Math.max(0.6, +$('#dThr').value - 0.08), st.region, p => prog(`Ищу цветные значки… ${gi}/${byCol.size}: ${Math.round(p * 100)}%`));
-        addF(f2, list);
-      }
-      if (bw.length) { const f2 = await SYM.find(st.ink, bw.map(o => o.s), +$('#dThr').value, st.region, p => prog(`Ищу значки… ${Math.round(p * 100)}%`)); addF(f2, bw); }
-      // повторы одного значка (соседние сдвиги по линии) — оставить лучший
-      found.sort((a, b) => (b.c || 0) - (a.c || 0)); { const keep = []; for (const d of found) if (!keep.some(o => Math.hypot(o.x + o.w / 2 - d.x - d.w / 2, o.y + o.h / 2 - d.y - d.h / 2) < Math.max(o.w, d.w, o.h, d.h) * 1.05)) keep.push(d); found = keep; }
-      // значки внутри ячеек таблицы-экспликации не считаем
-      st.dets = found.filter(d => !(st.exclude || []).some(e => d.x + d.w / 2 > e.x0 && d.x + d.w / 2 < e.x1 && d.y + d.h / 2 > e.y0 && d.y + d.h / 2 < e.y1)).filter(d => !st.samples.some(s => d.x < s.bb.x + s.bb.w && d.x + d.w > s.bb.x && d.y < s.bb.y + s.bb.h && d.y + d.h > s.bb.y));
-      assignRooms();
-      setMsg(`Найдено значков: ${st.dets.length}. Сверьте с экспликацией (справа), удалите лишние («✕ значок»), добавьте пропущенные («＋ значок»). Количество по помещениям — ниже, его можно поправить вручную.`);
+    try { await runFind(act, false); st.samples.forEach(s => (s.extra || []).forEach(e => { e.used = true; }));
+      setMsg(`Найдено значков: ${st.dets.length}. Сверьте с экспликацией (справа), удалите лишние («✕ значок»), добавьте пропущенные («＋ значок»). Не нашлась часть значков одной позиции — «⊕ ещё образец» по пропущенному значку и «Найти ещё».`);
     } catch (err) { setMsg('Поиск не удался: ' + err.message); }
     prog(''); $('#dFind').disabled = false; drawSamples(); draw(); drawGroups(); results();
+  };
+  $('#dMore').onclick = async () => {
+    const i = st.selSample, s = st.samples[i]; if (!s) { setMsg('Выберите позицию в списке образцов.'); return; }
+    if (!st.dets.length) { $('#dFind').click(); return; }
+    let act = tplsOf(s, i, true); const onlyNew = act.length > 0; if (!onlyNew) act = tplsOf(s, i);
+    $('#dMore').disabled = true; prog('Ищу ещё… 0%');
+    try { const before = st.dets.filter(d => d.ti === i && !d.off).length, n = await runFind(act, true); (s.extra || []).forEach(e => { e.used = true; });
+      setMsg(`«${s.label.slice(0, 40)}»: найдено ещё ${n} (было ${before}, стало ${before + n})${onlyNew ? ` — по ${act.length} доп. образц${act.length === 1 ? 'у' : 'ам'}` : ' — по всем образцам позиции'}. Новые отмечены точкой. Если остались пропущенные — ещё «⊕ ещё образец».`);
+    } catch (err) { setMsg('Поиск не удался: ' + err.message); }
+    prog(''); $('#dMore').disabled = false; drawSamples(); draw(); drawGroups(); results();
+  };
+  /* ---------- PDF листа с разметкой ---------- */
+  $('#dPdfOut').onclick = async () => {
+    if (!st.cv) { setMsg('Сначала откройте лист.'); return; }
+    const btn = $('#dPdfOut'); btn.disabled = true; prog('Готовлю PDF…');
+    try {
+      const W = st.cv.width, H = st.cv.height, c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+      x.drawImage(st.cv, 0, 0); const lw = Math.max(2, W / 1400), fs = Math.max(14, W / 160);
+      // значки — рамкой цвета позиции
+      for (const d of st.dets) { const q = st.samples[d.ti]; if (!q || !q.on || d.off) continue; x.strokeStyle = q.color; x.lineWidth = lw * 1.6; x.strokeRect(d.x - 1, d.y - 1, d.w + 2, d.h + 2); }
+      drawFrames(x, lw, fs * 0.8);
+      // помещения
+      st.rooms.forEach(rm => { if (rm.x == null) return; x.font = `bold ${fs * 0.8}px system-ui, sans-serif`; x.lineWidth = fs / 5; x.strokeStyle = '#fff'; x.strokeText(rm.name, rm.x, rm.y); x.fillStyle = '#2c3e50'; x.fillText(rm.name, rm.x, rm.y); });
+      // легенда: позиции, количество, рамки
+      const act = st.samples.map((q, i) => ({ q, i })).filter(o => o.q.on), cnt = i => st.dets.filter(d => d.ti === i && !d.off).length;
+      const fc = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }; Object.values(st.samples.some(q => q.kind === 'eui') ? frameCounts() : {}).forEach(f => { for (const k in fc) fc[k] += f[k] || 0; });
+      const lines = act.map(o => ({ col: o.q.color, t: `${o.q.label.slice(0, 60)} — ${cnt(o.i)} шт` })).concat(Object.values(fc).some(Boolean) ? [1, 2, 3, 4, 5].filter(k => fc[k]).map(k => ({ col: FCOL[k], t: `Рамка на ${k} пост${k === 1 ? '' : k < 5 ? 'а' : 'ов'} — ${fc[k]} шт`, frame: true })) : []);
+      x.font = `${fs}px system-ui, sans-serif`; const bw = Math.max(...lines.map(l => x.measureText(l.t).width), x.measureText('Найдено по чертежу').width) + fs * 3, bh = (lines.length + 1.6) * fs * 1.35;
+      const bx = fs, by = fs; x.fillStyle = 'rgba(255,255,255,.93)'; x.fillRect(bx, by, bw, bh); x.strokeStyle = '#333'; x.lineWidth = lw; x.strokeRect(bx, by, bw, bh);
+      x.fillStyle = '#000'; x.font = `bold ${fs}px system-ui, sans-serif`; x.fillText(`Найдено по чертежу · лист ${st.page}`, bx + fs * 0.6, by + fs * 1.3); x.font = `${fs}px system-ui, sans-serif`;
+      lines.forEach((l, k) => { const yy = by + fs * 1.3 + (k + 1) * fs * 1.35; x.strokeStyle = l.col; x.lineWidth = lw * (l.frame ? 2.2 : 1.6); x.strokeRect(bx + fs * 0.6, yy - fs * 0.8, fs * 1.2, fs * 0.9); x.fillStyle = '#000'; x.fillText(l.t, bx + fs * 2.2, yy); });
+      if (!window.jspdf) await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = (window.DOC_VENDOR && DOC_VENDOR.jspdf) || 'vendor/jspdf.umd.min.js'; sc.onload = ok; sc.onerror = () => no(new Error('не загрузился jsPDF')); document.head.appendChild(sc); });
+      const pg = await st.doc.getPage(st.page), vp = pg.getViewport({ scale: 1 }), mm = v => v * 25.4 / 72, pw = mm(vp.width), ph = mm(vp.height);
+      const doc = new window.jspdf.jsPDF({ orientation: pw > ph ? 'l' : 'p', unit: 'mm', format: [pw, ph] });
+      doc.addImage(c.toDataURL('image/jpeg', 0.88), 'JPEG', 0, 0, pw, ph);
+      const blob = doc.output('blob'), name = `Лист_${st.page}_разметка.pdf`;
+      if (!(await MTUI.saveFile(name, blob))) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); }
+      setMsg('PDF с разметкой сохранён: ' + name);
+    } catch (err) { setMsg('PDF не получился: ' + err.message); }
+    prog(''); btn.disabled = false;
   };
   /* ---------- группы одинаковых значков: тип проверяется и меняется сразу для всей группы ---------- */
   function drawGroups() {
@@ -268,9 +348,8 @@
     if (st.region) { ctx.strokeStyle = 'rgba(0,120,255,.5)'; ctx.setLineDash([8 / st.view.s, 6 / st.view.s]); ctx.lineWidth = lw; ctx.strokeRect(st.region.x0, st.region.y0, st.region.x1 - st.region.x0, st.region.y1 - st.region.y0); ctx.setLineDash([]); }
     st.samples.forEach(s => { ctx.strokeStyle = s.color; ctx.lineWidth = lw * 1.5; ctx.strokeRect(s.bb.x, s.bb.y, s.bb.w, s.bb.h); });
     // рамки ЭУИ
-    for (const cl of frameClusters()) { if (cl.length < 2) continue; const ds = cl.map(i => st.dets[i]); const x0 = Math.min(...ds.map(d => d.x)), y0 = Math.min(...ds.map(d => d.y)), x1 = Math.max(...ds.map(d => d.x + d.w)), y1 = Math.max(...ds.map(d => d.y + d.h));
-      ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = lw; ctx.strokeRect(x0 - 3, y0 - 3, x1 - x0 + 6, y1 - y0 + 6); ctx.fillStyle = '#000'; ctx.font = `${11 / st.view.s}px system-ui`; ctx.fillText(cl.length + ' п.', x1 + 4, y0 + 10 / st.view.s); }
-    for (const d of st.dets) { const s = st.samples[d.ti]; if (!s || !s.on || d.off) continue; ctx.strokeStyle = s.color; ctx.lineWidth = lw * 1.6; ctx.strokeRect(d.x, d.y, d.w, d.h); if (d.manual) { ctx.fillStyle = s.color; ctx.fillRect(d.x, d.y - 4 / st.view.s, 4 / st.view.s, 4 / st.view.s); } }
+    drawFrames(ctx, lw, 11 / st.view.s);
+    for (const d of st.dets) { const s = st.samples[d.ti]; if (!s || !s.on || d.off) continue; ctx.strokeStyle = s.color; ctx.lineWidth = lw * 1.6; ctx.strokeRect(d.x, d.y, d.w, d.h); if (d.manual || d.added) { ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(d.x + d.w, d.y, 3.5 / st.view.s, 0, 7); ctx.fill(); } }
     // границы помещений, нарисованные вручную
     st.rooms.forEach((rm, i) => { if (!rm.poly || rm.poly.length < 3) return; const sel = i === st.selRoom;
       ctx.beginPath(); rm.poly.forEach(([px, py], k) => k ? ctx.lineTo(px, py) : ctx.moveTo(px, py)); ctx.closePath();
@@ -285,6 +364,14 @@
     if (drag && drag.rect) { ctx.strokeStyle = '#e67e22'; ctx.lineWidth = lw; ctx.strokeRect(drag.rect.x, drag.rect.y, drag.rect.w, drag.rect.h); }
     ctx.restore();
   }
+  const FCOL = { 1: '#7f8c8d', 2: '#16a085', 3: '#2980b9', 4: '#e67e22', 5: '#8e44ad' };
+  /** Рамки ЭУИ на плане: цвет — по числу постов, ручные — сплошной линией потолще. */
+  function drawFrames(ctx, lw, fs) {
+    for (const cl of frameClusters()) { const ds = cl.map(i => st.dets[i]), n = Math.min(5, ds.length), x0 = Math.min(...ds.map(d => d.x)), y0 = Math.min(...ds.map(d => d.y)), x1 = Math.max(...ds.map(d => d.x + d.w)), y1 = Math.max(...ds.map(d => d.y + d.h));
+      if (n < 2 && !cl.manual) continue;
+      ctx.strokeStyle = FCOL[n]; ctx.lineWidth = lw * (cl.manual ? 2.2 : 1.4); if (!cl.manual) ctx.setLineDash([5 * lw, 3 * lw]); ctx.strokeRect(x0 - 4, y0 - 4, x1 - x0 + 8, y1 - y0 + 8); ctx.setLineDash([]);
+      ctx.font = `bold ${fs}px system-ui`; ctx.lineWidth = fs / 4; ctx.strokeStyle = '#fff'; const t = ds.length + ' п.'; ctx.strokeText(t, x1 + 6, y0 + fs); ctx.fillStyle = FCOL[n]; ctx.fillText(t, x1 + 6, y0 + fs); }
+  }
   function setTool(t) { if (t !== 'poly') st.draft = null; st.tool = t; el.querySelectorAll('[data-tool]').forEach(b => b.className = 'b sm' + (b.dataset.tool === t ? '' : ' ghost')); cv.style.cursor = t === 'pan' ? 'grab' : 'crosshair'; }
   el.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
   let drag = null;
@@ -295,16 +382,25 @@
   cv.addEventListener('pointermove', e => { if (st.tool === 'poly' && st.draft && !drag) { const r = cv.getBoundingClientRect(); st.hover = toImg(e.clientX - r.left, e.clientY - r.top); draw(); }
     if (!drag) return; const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top; if (Math.hypot(mx - drag.mx, my - drag.my) > 3) drag.moved = true;
     if (st.tool === 'pan' || e.buttons === 4) { st.view.x = drag.vx + mx - drag.mx; st.view.y = drag.vy + my - drag.my; draw(); return; }
-    if (st.tool === 'sample' || st.tool === 'region' || st.tool === 'rbox') { const [x, y] = toImg(mx, my); drag.rect = { x: Math.min(x, drag.x), y: Math.min(y, drag.y), w: Math.abs(x - drag.x), h: Math.abs(y - drag.y) }; draw(); } });
+    if (st.tool === 'sample' || st.tool === 'region' || st.tool === 'rbox' || st.tool === 'more' || st.tool === 'frame') { const [x, y] = toImg(mx, my); drag.rect = { x: Math.min(x, drag.x), y: Math.min(y, drag.y), w: Math.abs(x - drag.x), h: Math.abs(y - drag.y) }; draw(); } });
   cv.addEventListener('pointerup', e => {
     if (!drag) return; const d = drag; drag = null; const { x, y } = d;
     if (st.tool === 'sample' && d.rect && d.rect.w > 4 && d.rect.h > 4) {
       const bb = SYM.cropIcon(st.ink, { x0: d.rect.x, x1: d.rect.x + d.rect.w, y0: d.rect.y, y1: d.rect.y + d.rect.h }) || { x: Math.round(d.rect.x), y: Math.round(d.rect.y), w: Math.round(d.rect.w), h: Math.round(d.rect.h) };
       addSample(st.mode === 'eui' ? 'Розетка' : 'Светильник', bb, null); st.selSample = st.samples.length - 1; drawSamples(); setTool('pan');
       setMsg('Образец добавлен. Подпишите его и выберите изделие справа, затем «Найти значки».');
+    } else if (st.tool === 'more' && d.rect && d.rect.w > 4 && d.rect.h > 4) {
+      const q = st.samples[st.selSample]; if (!q) { setMsg('Сначала выберите позицию в списке образцов (щелчок по строке).'); }
+      else { const bb = SYM.cropIcon(st.ink, { x0: d.rect.x, x1: d.rect.x + d.rect.w, y0: d.rect.y, y1: d.rect.y + d.rect.h }) || { x: Math.round(d.rect.x), y: Math.round(d.rect.y), w: Math.round(d.rect.w), h: Math.round(d.rect.h) }, c = SYM.cut(st.ink, bb);
+        (q.extra = q.extra || []).push({ bb, g: c.g, w: c.w, h: c.h, used: false });
+        // сам обведённый значок — тоже найденный (если ещё не отмечен)
+        if (!st.dets.some(o => near(o, bb))) { st.dets.push({ x: bb.x, y: bb.y, w: bb.w, h: bb.h, ti: st.selSample, c: 1, manual: true }); assignRooms(); }
+        drawSamples(); drawGroups(); results();
+        setMsg(`К позиции «${q.label.slice(0, 40)}» добавлен образец №${q.extra.length + 1}. Можно обвести ещё, затем «Найти ещё» — найденное раньше сохранится.`); }
+    } else if (st.tool === 'frame' && d.rect && d.rect.w > 3 && d.rect.h > 3) { setFrame(d.rect);
     } else if (st.tool === 'region' && d.rect && d.rect.w > 20) { st.region = { x0: d.rect.x, y0: d.rect.y, x1: d.rect.x + d.rect.w, y1: d.rect.y + d.rect.h }; setTool('pan'); }
     else if (!d.moved && st.tool === 'add' && st.samples[st.selSample]) { const s = st.samples[st.selSample]; st.dets.push({ x: x - s.w / 2, y: y - s.h / 2, w: s.w, h: s.h, ti: st.selSample, c: 1, manual: true }); assignRooms(); drawSamples(); drawGroups(); results(); }
-    else if (!d.moved && st.tool === 'del') { const i = st.dets.findIndex(o => x >= o.x - 3 && x <= o.x + o.w + 3 && y >= o.y - 3 && y <= o.y + o.h + 3); if (i >= 0) { st.dets.splice(i, 1); drawSamples(); drawGroups(); results(); } }
+    else if (!d.moved && st.tool === 'del') { const i = st.dets.findIndex(o => x >= o.x - 3 && x <= o.x + o.w + 3 && y >= o.y - 3 && y <= o.y + o.h + 3); if (i >= 0) { (st.rejected = st.rejected || []).push(st.dets[i]); st.dets.splice(i, 1); drawSamples(); drawGroups(); results(); } }
     else if (st.tool === 'rbox' && d.rect && d.rect.w > 10 && d.rect.h > 10) { const R = d.rect; setPoly([[R.x, R.y], [R.x + R.w, R.y], [R.x + R.w, R.y + R.h], [R.x, R.y + R.h]]); }
     else if (!d.moved && st.tool === 'poly') {
       if (!st.rooms[st.selRoom]) { setMsg('Сначала выберите помещение в списке справа (или добавьте «+ помещение»).'); }
@@ -328,7 +424,18 @@
   }
   new ResizeObserver(() => draw()).observe(cv);
   /* ---------- результат ---------- */
-  function frameClusters() { const L = st.dets.filter(d => !d.off && st.samples[d.ti] && st.samples[d.ti].on && st.samples[d.ti].kind === 'eui' && st.samples[d.ti].vid); return SYM.frames(L).map(cl => cl.map(i => st.dets.indexOf(L[i]))); }
+  function frameClusters() { const L = st.dets.filter(d => !d.off && st.samples[d.ti] && st.samples[d.ti].on && st.samples[d.ti].kind === 'eui' && st.samples[d.ti].vid);
+    // рамки, заданные вручную («▣ рамка ЭУИ»), — как есть; остальные значки — группы вплотную
+    const man = new Map(), auto = []; L.forEach(d => { if (d.fg) { if (!man.has(d.fg)) man.set(d.fg, []); man.get(d.fg).push(st.dets.indexOf(d)); } else auto.push(d); });
+    const out = SYM.frames(auto).map(cl => cl.map(i => st.dets.indexOf(auto[i]))); man.forEach(cl => { cl.manual = true; out.push(cl); }); return out; }
+  /** «▣ рамка ЭУИ»: все значки ЭУИ в прямоугольнике — одна рамка на столько постов, сколько значков. */
+  function setFrame(R) {
+    const ins = st.dets.filter(d => !d.off && st.samples[d.ti] && st.samples[d.ti].kind === 'eui' && st.samples[d.ti].vid && d.x + d.w / 2 >= R.x && d.x + d.w / 2 <= R.x + R.w && d.y + d.h / 2 >= R.y && d.y + d.h / 2 <= R.y + R.h);
+    if (!ins.length) { setMsg('В рамке нет найденных значков ЭУИ. Обведите значки целиком (центры значков должны попасть в рамку).'); return; }
+    if (ins.length > 5) { setMsg(`В рамке ${ins.length} значков — рамок больше чем на 5 постов не бывает. Обведите меньше значков.`); return; }
+    const id = 'f' + (st.fgN = (st.fgN || 0) + 1); ins.forEach(d => { d.fg = id; });
+    draw(); results(); setMsg(`Рамка на ${ins.length} пост${ins.length === 1 ? '' : ins.length < 5 ? 'а' : 'ов'} — в расчёте. Прежние рамки этих значков убраны. Отменить ручные рамки — «сбросить рамки» под таблицей.`);
+  }
   const roomName = i => (i >= 0 && st.rooms[i] ? st.rooms[i].name : 'Весь объект');
   function counts() {
     const c = {}; // room → ti → n
@@ -339,16 +446,16 @@
   function frameCounts() {
     const f = {}, add = (r, n) => { f[r] = f[r] || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }; while (n > 0) { const k = Math.min(5, n); f[r][k]++; n -= k; } };
     const cls = frameClusters().map(cl => { const ds = cl.map(i => st.dets[i]), x0 = Math.min(...ds.map(d => d.x)), y0 = Math.min(...ds.map(d => d.y)), x1 = Math.max(...ds.map(d => d.x + d.w)), y1 = Math.max(...ds.map(d => d.y + d.h));
-      const rv = {}; ds.forEach(d => { const r = roomName(d.room); rv[r] = (rv[r] || 0) + 1; }); return { n: ds.length, x0, y0, x1, y1, room: Object.entries(rv).sort((a, b) => b[1] - a[1])[0][0], lbl: null, sz: Math.max(...ds.map(d => Math.max(d.w, d.h))) }; });
+      const rv = {}; ds.forEach(d => { const r = roomName(d.room); rv[r] = (rv[r] || 0) + 1; }); return { n: ds.length, x0, y0, x1, y1, room: Object.entries(rv).sort((a, b) => b[1] - a[1])[0][0], lbl: null, sz: Math.max(...ds.map(d => Math.max(d.w, d.h))), manual: !!cl.manual }; });
     st.frameDiag = [];
     if (st.frameLbl && st.frameLbl.length) {
       // каждой подписи — ближайшая группа значков (подписи стоят рядом с рамкой)
-      const pairs = []; st.frameLbl.forEach((L, li) => cls.forEach((c, ci) => { const dx = Math.max(c.x0 - L.x, 0, L.x - c.x1), dy = Math.max(c.y0 - L.y, 0, L.y - c.y1), dd = Math.hypot(dx, dy); if (dd < c.sz * 4) pairs.push([dd, li, ci]); }));
+      const pairs = []; st.frameLbl.forEach((L, li) => cls.forEach((c, ci) => { if (c.manual) return; const dx = Math.max(c.x0 - L.x, 0, L.x - c.x1), dy = Math.max(c.y0 - L.y, 0, L.y - c.y1), dd = Math.hypot(dx, dy); if (dd < c.sz * 4) pairs.push([dd, li, ci]); }));
       pairs.sort((a, b) => a[0] - b[0]); const usedL = new Set();
       for (const [, li, ci] of pairs) { if (usedL.has(li) || cls[ci].lbl) continue; cls[ci].lbl = st.frameLbl[li]; usedL.add(li); }
       // рамка на N постов, а рядом найдено меньше значков: добавить ближайшие соседние группы в линию
       cls.forEach(c => { if (!c.lbl) return; for (let guard = 0; guard < 5 && c.n < c.lbl.n; guard++) {
-        let bi = -1, bd = 1e9; cls.forEach((o, oi) => { if (o === c || o.lbl || o.absorbed) return; const gx = Math.max(o.x0 - c.x1, c.x0 - o.x1, 0), gy = Math.max(o.y0 - c.y1, c.y0 - o.y1, 0), alignH = gy === 0 && Math.abs((o.y0 + o.y1) - (c.y0 + c.y1)) < c.sz, alignV = gx === 0 && Math.abs((o.x0 + o.x1) - (c.x0 + c.x1)) < c.sz, dd = Math.max(gx, gy);
+        let bi = -1, bd = 1e9; cls.forEach((o, oi) => { if (o === c || o.lbl || o.absorbed || o.manual) return; const gx = Math.max(o.x0 - c.x1, c.x0 - o.x1, 0), gy = Math.max(o.y0 - c.y1, c.y0 - o.y1, 0), alignH = gy === 0 && Math.abs((o.y0 + o.y1) - (c.y0 + c.y1)) < c.sz, alignV = gx === 0 && Math.abs((o.x0 + o.x1) - (c.x0 + c.x1)) < c.sz, dd = Math.max(gx, gy);
           if ((alignH || alignV) && dd < c.sz * 1.2 && o.n + c.n <= c.lbl.n && dd < bd) { bd = dd; bi = oi; } });
         if (bi < 0) break; const o = cls[bi]; o.absorbed = true; c.n += o.n; c.x0 = Math.min(c.x0, o.x0); c.y0 = Math.min(c.y0, o.y0); c.x1 = Math.max(c.x1, o.x1); c.y1 = Math.max(c.y1, o.y1); } });
       st.frameLbl.forEach((L, li) => { if (!usedL.has(li)) { add(roomName(roomAt(L.x, L.y)), L.n); st.frameDiag.push(`подпись Р-0${L.n} без найденных значков рядом`); } });
@@ -372,10 +479,12 @@
     h += `<tr><td><b>Итого</b></td>${act.map(o => `<td><b>${tot[o.i] || 0}</b>${o.s.qty != null ? `<span class="mute"> / ${o.s.qty}</span>` : ''}</td>`).join('')}${act.some(o => o.s.kind === 'eui') ? '<td></td>' : ''}</tr></table></div>`;
     const hasE = act.some(o => o.s.kind === 'eui'), hasL = act.some(o => o.s.kind === 'light');
     h += (hasE ? `<p class="mute">${st.frameLbl && st.frameLbl.length ? `Рамки — группы значков вплотную; число постов — по подписи «Р-0N» рядом (подписей на плане: ${st.frameLbl.length}).${st.frameDiag && st.frameDiag.length ? ' Проверьте: ' + esc(st.frameDiag.slice(0, 8).join('; ')) + (st.frameDiag.length > 8 ? '…' : '') : ''}` : 'Рамки: значки, стоящие вплотную, считаются одной рамкой (число значков = число постов). Проверьте на плане — рамки обведены и подписаны «N п.».'}</p>` : '') +
+      (hasE ? `<p class="mute" style="margin:4px 0">Рамка посчитана неверно — инструмент «▣ рамка ЭУИ»: обведите значки одной рамки, число постов исправится. Ручных рамок: ${new Set(st.dets.filter(d => d.fg).map(d => d.fg)).size}${st.dets.some(d => d.fg) ? ' · <a href="#" id="dFgReset">сбросить ручные рамки</a>' : ''}</p>` : '') +
       `<div class="row">${hasE ? '<button class="b" id="dToV">Розетки и выключатели → «ЭУИ Voltum»</button>' : ''}${hasL ? '<button class="b" id="dToK">Светильники → «КП Maytoni»</button>' : ''}<span class="mute">Площади помещений — из экспликации; по ним считается освещённость.</span></div>`;
     $('#dOut').innerHTML = h + '</div>';
     $('#dOut').querySelectorAll('[data-man]').forEach(x => x.onchange = () => { const v = x.value.trim(); if (v === '') delete st.manual[x.dataset.man]; else st.manual[x.dataset.man] = Math.max(0, +v || 0); results(); });
     $('#dOut').querySelectorAll('[data-fm]').forEach(x => x.onchange = () => { const [r, k] = x.dataset.fm.split('|'); const base = st.frameMan[r] || Object.assign({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, fr[r] || {}); base[k] = Math.max(0, +x.value || 0); st.frameMan[r] = base; results(); });
+    const fgr = $('#dFgReset'); if (fgr) fgr.onclick = e => { e.preventDefault(); st.dets.forEach(d => { delete d.fg; }); draw(); results(); };
     const toV = $('#dToV'); if (toV) toV.onclick = () => {
       const list = [];
       for (const r of rooms) act.filter(o => o.s.kind === 'eui').forEach(o => { const n = finalN(r, o.i, (c[r] || {})[o.i] || 0); if (n > 0) list.push({ room: r, type: o.s.label, qty: n, id: o.s.vid || '' }); });
@@ -401,5 +510,5 @@
     };
   }
   window.addEventListener('tab-shown', e => { if (e.detail === 'drw') { if (st.cv && !st.view.s) fit(); draw(); } });
-  window.DRAWING = { setRoomPoly: (i, P) => { st.selRoom = i; setPoly(P); }, roomAt, addSampleRect: (label, r) => { const bb = SYM.cropIcon(st.ink, { x0: r[0], y0: r[1], x1: r[2], y1: r[3] }) || { x: r[0], y: r[1], w: r[2] - r[0], h: r[3] - r[1] }; const s = addSample(label, bb, null); drawSamples(); draw(); return s; }, st, results, autoRooms, frameInfo: () => frameCounts(), counts: () => counts() };
+  window.DRAWING = { setFrame: r => setFrame({ x: r[0], y: r[1], w: r[2] - r[0], h: r[3] - r[1] }), frameClusters: () => frameClusters(), frameCounts: () => frameCounts(), setRoomPoly: (i, P) => { st.selRoom = i; setPoly(P); }, roomAt, addSampleRect: (label, r) => { const bb = SYM.cropIcon(st.ink, { x0: r[0], y0: r[1], x1: r[2], y1: r[3] }) || { x: r[0], y: r[1], w: r[2] - r[0], h: r[3] - r[1] }; const s = addSample(label, bb, null); drawSamples(); draw(); return s; }, st, results, autoRooms, frameInfo: () => frameCounts(), counts: () => counts() };
 })();
