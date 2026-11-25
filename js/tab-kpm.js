@@ -115,7 +115,7 @@
       const n = +(counts[r] || {})[i] || 0, x = MT.get(t.a); if (!n) return;
       if (!x) { warn.push(`${r}: «${t.label}» — модель не выбрана`); return; }
       rows.push({ room: r, a: x.a, qty: n, note: 'по чертежу: ' + t.label, group: ['встраиваемый', 'накладной', 'потолочный'].includes(MT.kind(x)) ? 'Общий свет' : MT.kind(x) === 'настенный' ? 'Бра' : 'Декоративный свет' });
-      const f = MT.features(x); if (lamps && f.cap) { const lp = KITS.lampFor(f.cap, cct) || KITS.lampFor(f.cap); if (lp) rows.push({ room: r, a: lp.a, qty: n * (f.nl || 1), note: `лампы ${f.cap} к ${x.a}`, group: 'Лампы' }); else warn.push(`${x.a}: лампа ${f.cap} не найдена`); }
+      const f = MT.features(x); if (t.lamp && MT.get(t.lamp)) rows.push({ room: r, a: MT.get(t.lamp).a, qty: n * (f.nl || 1), note: `лампы к ${x.a} (из проекта)`, group: 'Лампы' }); else if (lamps && f.cap) { const lp = KITS.lampFor(f.cap, cct) || KITS.lampFor(f.cap); if (lp) rows.push({ room: r, a: lp.a, qty: n * (f.nl || 1), note: `лампы ${f.cap} к ${x.a}`, group: 'Лампы' }); else warn.push(`${x.a}: лампа ${f.cap} не найдена`); }
     });
     for (const t of tracks) {
       const sides = String(t.sides).split(/[,;\s]+/).map(v => parseFloat(v.replace(',', '.'))).filter(v => v > 0), geo = KITS.trackShape(t.shape, sides);
@@ -146,7 +146,7 @@
   };
   /** Из «По чертежу»: list — [{label, a?}], cnt — {помещение: {индекс: n}}, rs — [{name, S}]. */
   function setFromDrawing(list, cnt, rs) {
-    types = list.map(t => { const s = t.a && MT.get(t.a) ? { a: MT.get(t.a).a, why: t.why || 'выбрано на чертеже', alts: suggest(t.label).alts, manual: !!t.manual } : suggest(t.label); return Object.assign({ label: t.label }, s); });
+    types = list.map(t => { const s = t.a && MT.get(t.a) ? { a: MT.get(t.a).a, why: t.why || 'выбрано на чертеже', alts: suggest(t.label).alts, manual: !!t.manual } : suggest(t.label); return Object.assign({ label: t.label, lamp: t.lamp || '' }, s); });
     counts = cnt; rooms = rs || []; built = []; $('#kmOut').innerHTML = ''; drawTypes(); drawTracks();
   }
   drawTypes(); drawTracks();

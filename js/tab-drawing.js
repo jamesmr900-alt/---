@@ -8,15 +8,15 @@
   const el = document.querySelector('section[data-p="drw"]'); if (!el) return;
   const SC = 3;   // масштаб рендера листа: 3 px на pt (тонкие линии значков различимы)
   const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#9a6324', '#469990', '#800000', '#808000', '#000075', '#bfef45', '#fabed4'];
-  const st = { doc: null, page: 0, cv: null, ink: null, items: [], mode: 'eui', samples: [], dets: [], rooms: [], draft: null, hover: null, zones: null, walls: null, region: null, view: { s: 0.4, x: 0, y: 0 }, tool: 'pan', selSample: 0, selRoom: 0, manual: {}, frameMan: {}, titles: [] };
+  const st = { doc: null, page: 0, cv: null, ink: null, items: [], mode: 'eui', samples: [], dets: [], rooms: [], draft: null, hover: null, zones: null, walls: null, region: null, view: { s: 0.4, x: 0, y: 0 }, tool: 'pan', selSample: 0, selRoom: 0, hlRoom: -1, manual: {}, frameMan: {}, titles: [] };
   el.innerHTML = `
   <div class="card"><h3>1. Лист проекта</h3>
     <div class="row">
-      <label class="b ghost" style="cursor:pointer">PDF проекта…<input type="file" id="dPdf" accept=".pdf" hidden></label>
+      <label class="b ghost" style="cursor:pointer">PDF / DWG проекта…<input type="file" id="dPdf" accept=".pdf,.dwg,.dxf" hidden></label>
       <label>Лист<select id="dPage" style="min-width:320px"><option value="">— загрузите PDF —</option></select></label>
       <label>Что считаем<select id="dMode"><option value="eui">розетки и выключатели (ЭУИ)</option><option value="light">светильники</option></select></label>
       <button class="b" id="dOpen">Открыть лист</button>
-      <span class="mute" id="dMsg">Подойдёт план розеток и выключателей или план светильников. Образцы значков берутся из экспликации / условных обозначений на этом же листе.</span>
+      <span class="mute" id="dMsg">Подойдёт план розеток и выключателей или план светильников (PDF, DWG или DXF). Образцы значков берутся из экспликации / условных обозначений на этом же листе.</span>
     </div></div>
   <div class="card" id="dWork" hidden>
     <div class="row" style="margin-bottom:6px;gap:6px">
@@ -58,6 +58,8 @@
   /* ---------- загрузка ---------- */
   $('#dPdf').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
+    if (/\.(dwg|dxf)$/i.test(f.name)) { await openDwg(f); return; }
+    st.dwg = null;
     setMsg('Читаю PDF…');
     try {
       st.doc = await SYM.open(f); st.titles = [];
@@ -77,12 +79,27 @@
       setMsg(`Листов: ${st.doc.numPages}. Выбран лист ${pick}. Нажмите «Открыть лист».`);
     } catch (err) { setMsg('Не удалось прочитать PDF: ' + err.message); }
   };
+  /** DWG/DXF: один лист — пространство модели. Значки берутся из объектов чертежа (блоки, индексы DIALux), картинка — для проверки. */
+  async function openDwg(f) {
+    setMsg('Загружаю модуль чтения DWG (первый раз ~8 МБ)…');
+    try { await DWG.lib(); setMsg('Читаю ' + f.name + '…'); await new Promise(r => setTimeout(r, 30));
+      const db = await DWG.open(f); st.dwg = DWG.prepare(db, f.name); st.doc = null;
+      const all = st.dwg.F.texts.map(t => t.s).join(' '), dl = st.dwg.F.texts.some(t => /LUMKEY/i.test(t.L));
+      const kind = dl || /светильник|освещени|lum/i.test(all) && !/розет|выключ/i.test(all) ? 'light' : /розет|выключ/i.test(all) ? 'eui' : 'light';
+      st.titles = [{ n: 1, t: `${f.name} — модель${dl ? ' (экспорт DIALux)' : ''}`, kind, floor: SYM.floorOf(all.slice(0, 2000)) || 0 }];
+      $('#dPage').innerHTML = `<option value="1">${esc(st.titles[0].t)}</option>`; $('#dPage').value = 1; $('#dMode').value = kind;
+      setMsg(`DWG прочитан: линий ${st.dwg.F.lines.length}, текстов ${st.dwg.F.texts.length}, вставок блоков ${st.dwg.F.inserts.length}${st.dwg.F.truncated ? ' (чертёж очень большой — показана часть)' : ''}. Нажмите «Открыть лист».`);
+    } catch (err) { st.dwg = null; setMsg('Не удалось прочитать DWG: ' + err.message + '. Попробуйте сохранить файл в AutoCAD как DXF или PDF.'); }
+  }
+  /** Картинка листа в масштабе scale (px на pt для PDF; для DWG — относительно базового масштаба). */
+  const renderPage = scale => st.dwg ? Promise.resolve(DWG.render(st.dwg, scale / SC)) : SYM.render(st.doc, st.page, scale);
   $('#dPage').onchange = () => { const p = st.titles[+$('#dPage').value - 1]; if (p && (p.kind === 'eui' || p.kind === 'light')) $('#dMode').value = p.kind; };
   $('#dOpen').onclick = async () => {
-    if (!st.doc) { setMsg('Сначала загрузите PDF.'); return; }
-    st.page = +$('#dPage').value; st.mode = $('#dMode').value; setMsg('Открываю лист…');
-    st.cv = await SYM.render(st.doc, st.page, SC); st.ink = SYM.ink(st.cv);
-    const pi = await SYM.pageItems(st.doc, st.page, SC); st.items = pi.items;
+    if (!st.doc && !st.dwg) { setMsg('Сначала загрузите PDF или DWG.'); return; }
+    st.page = +$('#dPage').value; st.mode = $('#dMode').value; setMsg('Открываю лист…'); await new Promise(r => setTimeout(r, 20));
+    st.cv = await renderPage(SC); st.ink = SYM.ink(st.cv);
+    const pi = st.dwg ? { items: DWG.items(st.dwg), W: st.cv.width } : await SYM.pageItems(st.doc, st.page, SC); st.items = pi.items;
+    st.hlRoom = -1; st.roomMap = null;
     st.samples = []; st.dets = []; st.rgb = null; st.manual = {}; st.frameMan = {}; st.region = null; st.walls = null; st.zones = null;
     // образцы из экспликации / условных обозначений
     const lg = SYM.legendRows(st.items, pi.W);
@@ -100,6 +117,7 @@
       const bb = b1 && b0 ? (b0.w * b0.h <= b1.w * b1.h ? b0 : b1) : b1 || b0; if (!bb) continue;   // из двух вариантов ячейки — более точный (меньший)
       addSample(r.label, bb, r.qty);
     }
+    if (st.dwg) dwgSamples();
     // область поиска: план без правой панели и без примечаний внизу
     const notes = st.items.find(i => /^Примечани/i.test(i.s) && (!st.panelX || i.x < st.panelX * 0.6) && i.y > st.cv.height * 0.55);
     // таблица обозначений справа сверху — исключить полосу справа целиком; таблица ниже середины — исключить только её прямоугольник до низа листа
@@ -112,8 +130,32 @@
     st.region = { x0: 0, y0: 0, x1: st.cv.width, y1: notes ? notes.y - notes.h * 1.5 : st.cv.height };
     $('#dWork').hidden = false; fit(); drawSamples(); draw();
     await autoRooms();
+    if (st.dwg) { drawGroups(); results(); const v = st.samples.filter(s => s.vec), n = st.dets.filter(d => d.vec).length;
+      setMsg(st.dwgInfo.mode === 'dialux' ? `DWG (экспорт DIALux): позиций ${v.length}, светильников по индексам ${n}${st.dwgInfo.title ? ' — «' + st.dwgInfo.title + '»' : ''}. Количество посчитано по объектам чертежа; ленты — в метрах и бухтах. Сверьте с таблицей «Число» справа.`
+        : v.length ? `DWG: типов значков (блоков) ${v.length}${st.dwgInfo.samples.some(s => s.inLegend) ? ' из условных обозначений' : ''}, найдено ${n}. Лишние типы снимите галочкой, подпись и модель поправьте справа. Значки, нарисованные без блоков, ищутся как в PDF: «▭ образец» → «Найти значки».`
+        : `DWG: блоков-значков не найдено. Обведите значок инструментом «▭ образец» и нажмите «Найти значки» — поиск по картинке, как в PDF.`); return; }
     setMsg(`Лист ${st.page}: образцов из таблицы — ${st.samples.length}${lg.rows.length > st.samples.length ? ` (из ${lg.rows.length} строк)` : ''}, помещений — ${st.rooms.length}. Проверьте образцы и нажмите «Найти значки». Если значок не взялся — инструмент «образец».`);
   };
+  /** Значки из объектов DWG: блоки или индексы DIALux. Совпавший с образцом из легенды блок получает его подпись. */
+  function dwgSamples() {
+    const r = DWG.detect(st.dwg); st.dwgInfo = r;
+    if (r.mode === 'dialux') { st.samples = []; st.exclude = []; }
+    const iou = (a, b) => { const I = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)); return I / (a.w * a.h + b.w * b.h - I); };
+    for (const q of r.samples) {
+      // строка легенды с тем же значком: наибольшее перекрытие (значок блока в легенде против вырезанного из картинки)
+      let ov = null, bo = 0.2; if (q.legendBb) st.samples.forEach(s => { if (s.vec) return; const v = iou(s.bb, q.bb); if (v > bo) { bo = v; ov = s; } });
+      if (ov && q.bb) { const c = SYM.cut(st.ink, q.bb); Object.assign(ov, { bb: q.bb, g: c.g, w: c.w, h: c.h }); }
+      const s = ov || addSample(q.label, q.bb, q.qty);
+      s.vec = true; s.lamp = q.lamp || ''; s.block = q.block || ''; s.seg = q.seg || 0; s.reel = q.reel || 0; if (q.on === false) s.on = false; else if (!s.frame) s.on = true;
+      if (q.qty != null) s.qty = q.qty;
+      if (q.kind === 'light' && s.kind !== 'light' && !/розет|выключ/i.test(s.label)) { s.kind = 'light'; s.vid = ''; }
+      if (q.a && !MT.get(q.a) && MT.get(q.a.replace(/\(N\)$/, ''))) q.a = q.a.replace(/\(N\)$/, '');
+      if (q.a && MT.get(q.a)) { s.a = MT.get(q.a).a; s.why = 'артикул из чертежа'; s.manualA = true; s.alts = [...new Set([s.a, ...(s.alts || [])])]; }
+      else if (s.kind === 'light' && !s.a) classify(s);
+      const ti = st.samples.indexOf(s); q.dets.forEach(d => st.dets.push(Object.assign(d, { ti, c: 1, vec: true })));
+    }
+    // образцы из легенды, для которых блока не нашлось, — остаются для поиска по картинке
+  }
   /** Значок — ЭУИ (розетка, выключатель…) или светильник; для светильника — модель по описанию (можно поменять). */
   function classify(s, keepA) {
     if (s.frame) { s.kind = 'frame'; s.vid = ''; return; }
@@ -131,6 +173,15 @@
   /* ---------- помещения ---------- */
   async function autoRooms() {
     st.rooms = [];
+    if (st.dwg) { // экспликация помещений на том же чертеже, иначе — подписи помещений на плане
+      const tab = SYM.roomTable(st.items);
+      if (tab.length >= 2) { const nums = SYM.roomNumbers(st.items, tab, st.panelX, st.ink), cnt = {}; tab.forEach(r => { cnt[r.name] = (cnt[r.name] || 0) + 1; });
+        tab.forEach(r => { const p = nums.get(r.no); st.rooms.push({ name: cnt[r.name] > 1 ? `${r.name} (пом. ${r.no})` : r.name, S: r.S, no: r.no, x: p ? p.x : null, y: p ? p.y : null }); }); }
+      else { const RX = /^(кухн|гостин|спальн|санузел|с\/у|ванн|прихож|холл|коридор|кабинет|детск|гардероб|кладов|постироч|прачеч|лоджи|балкон|террас|котельн|тамбур|лестни|столов|зал\b|офис|переговор|ресепшн|кафе|магазин|торгов|склад|туалет|wc\b|душев|бассейн|сауна|техн|служеб|комната|помещени)/i, seen = {};
+        for (const t of st.items) { if (!RX.test(t.s) || t.s.length > 40 || st.dets.some(d => t.x > d.x - 2 && t.x < d.x + d.w + 2 && t.y > d.y - 2 && t.y < d.y + d.h + 2)) continue;
+          const nm = t.s.replace(/\s+/g, ' '); seen[nm] = (seen[nm] || 0) + 1; st.rooms.push({ name: seen[nm] > 1 ? `${nm} ${seen[nm]}` : nm, S: (/(\d+[.,]\d+)\s*м/.exec(t.s) || [])[1] || null, x: t.x + t.w / 2, y: t.y - t.h / 2 }); } }
+      st.roomSrc = null; rebuildZones(); drawRooms(); draw(); return;
+    }
     const cur = st.titles[st.page - 1], floor = cur ? cur.floor : 0, base = await st.doc.getPage(st.page), bvp = base.getViewport({ scale: 1 });
     let best = null;
     const cands = st.titles.filter(p => p.kind === 'rooms' || p.n === st.page).sort((a, b) => (b.n === st.page) - (a.n === st.page) || (b.floor === floor) - (a.floor === floor));
@@ -157,23 +208,43 @@
   }
   function rebuildZones() {
     const placed = st.rooms.filter(r => r.x != null && !(r.poly && r.poly.length > 2));
+    st.roomMap = null; st.hlCv = null;
     if (!placed.length || !st.cv) { st.zones = null; assignRooms(); return; }
-    st.walls = st.walls || SYM.walls(st.cv, 4);
+    st.walls = st.walls || (st.dwg && DWG.wallCanvas(st.dwg) ? SYM.walls(DWG.wallCanvas(st.dwg), 4) : SYM.walls(st.cv, 4));
     st.zones = SYM.zones(st.walls, placed); st.zones.map = placed.map(r => st.rooms.indexOf(r));
     assignRooms();
+  }
+  /** Карта «клетка → помещение» тем же правилом, что и для значков (roomAt), — для закраски площади помещения. */
+  function roomGrid() {
+    if (st.roomMap) return st.roomMap; if (!st.cv) return null;
+    const W = st.cv.width, H = st.cv.height, g = Math.max(6, Math.round(Math.max(W, H) / 450)), w = Math.ceil(W / g), h = Math.ceil(H / g), a = new Int16Array(w * h).fill(-1), R = st.region || { x0: 0, y0: 0, x1: W, y1: H }, wm = st.walls;
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { const x = (i + 0.5) * g, y = (j + 0.5) * g;
+      if (x < R.x0 || x > R.x1 || y < R.y0 || y > R.y1 || (st.exclude || []).some(e => x > e.x0 && x < e.x1 && y > e.y0 && y < e.y1)) continue;
+      if (wm && wm.m[Math.floor(y / wm.ds) * wm.w + Math.floor(x / wm.ds)]) continue;
+      a[j * w + i] = roomAt(x, y); }
+    return (st.roomMap = { g, w, h, a });
+  }
+  function roomHl(ri) {
+    if (st.hlCv && st.hlCv.ri === ri) return st.hlCv; const m = roomGrid(); if (!m) return null;
+    const c = document.createElement('canvas'); c.width = m.w; c.height = m.h; const x = c.getContext('2d'), im = x.createImageData(m.w, m.h);
+    for (let k = 0; k < m.a.length; k++) if (m.a[k] === ri) { im.data[k * 4] = 230; im.data[k * 4 + 1] = 126; im.data[k * 4 + 2] = 34; im.data[k * 4 + 3] = 80; }
+    x.putImageData(im, 0, 0); return (st.hlCv = { cv: c, g: m.g, ri });
   }
   function assignRooms() { st.dets.forEach(d => { d.room = roomAt(d.x + d.w / 2, d.y + d.h / 2); }); }
   function drawRooms() {
     const b = $('#dRooms');
     if (!st.rooms.length) { b.innerHTML = 'Помещения не найдены. Добавьте вручную и поставьте метки на план (инструмент «помещение»). Без помещений всё попадёт в «Весь объект».'; return; }
     b.innerHTML = (st.roomSrc && st.roomSrc !== st.page ? `<div style="margin-bottom:4px">Номера и названия — с листа ${st.roomSrc}. Проверьте, что метки стоят в своих помещениях.</div>` : '') +
-      st.rooms.map((r, i) => `<div class="row" style="gap:4px;margin:2px 0;${i === st.selRoom ? 'background:#fff6e0;border-radius:6px' : ''}"><input type="radio" name="dSelRoom" data-sr="${i}" ${i === st.selRoom ? 'checked' : ''} style="width:auto">
+      st.rooms.map((r, i) => `<div class="row" style="gap:4px;margin:2px 0;${i === st.selRoom ? 'background:#fff6e0;border-radius:6px' : ''}"><input type="radio" name="dSelRoom" data-sr="${i}" ${i === st.selRoom ? 'checked' : ''} style="width:auto" title="Выбрать помещение и показать на плане его площадь (повторный щелчок — скрыть)"><span data-srh="${i}" title="площадь закрашена на плане — щёлкните ещё раз по кружку, чтобы скрыть" style="font-size:11px;color:#e67e22;width:12px">${i === st.hlRoom ? '◼' : ''}</span>
         <input data-rn="${i}" value="${esc(r.name)}" style="width:150px;font-size:12px"><span style="width:44px">${r.S ? r.S + ' м²' : ''}</span><span title="${r.poly ? 'границы нарисованы вручную' : r.x != null ? 'метка на плане' : 'нет метки — выберите и щёлкните на плане инструментом «помещение» или нарисуйте границы'}">${r.poly ? '▱' : r.x != null ? '⌖' : '⚠'}</span>${r.poly ? `<button class="b ghost sm" data-rpc="${i}" title="Убрать границы — помещение снова по метке">▱✕</button>` : ''}<button class="b ghost sm" data-rd="${i}">✕</button></div>`).join('') +
       '<div style="margin-top:4px">Значки уходят не в то помещение? Выберите помещение и обведите его инструментом «▱ границы линией» или «▭ границы областью».</div>';
-    b.querySelectorAll('[data-sr]').forEach(x => x.onchange = () => { st.selRoom = +x.dataset.sr; if (!['poly', 'rbox'].includes(st.tool)) setTool('room'); drawRooms(); draw(); });
+    // щелчок по помещению — выбрать и закрасить его площадь (как её понимает расчёт); повторный щелчок — снять закраску
+    b.querySelectorAll('[data-sr]').forEach(x => x.onclick = () => { const i = +x.dataset.sr; st.selRoom = i; st.hlRoom = st.hlRoom === i ? -1 : i; st.hlCv = null;
+      if (st.rooms[i].x == null && !st.rooms[i].poly && !['poly', 'rbox'].includes(st.tool)) setTool('room'); drawRooms(); draw();
+      if (st.hlRoom >= 0) { const n = st.dets.filter(d => d.room === i && !d.off && st.samples[d.ti] && st.samples[d.ti].on).length; setMsg(`Закрашено то, что расчёт относит к «${st.rooms[i].name}»: значков внутри — ${n}. Повторный щелчок по помещению снимет закраску. Граница неверна — «▱ границы линией» или «▭ границы областью».`); } });
     b.querySelectorAll('[data-rn]').forEach(x => x.onchange = () => { st.rooms[+x.dataset.rn].name = x.value; results(); draw(); });
     b.querySelectorAll('[data-rpc]').forEach(x => x.onclick = () => { const r = st.rooms[+x.dataset.rpc]; delete r.poly; delete r.polyT; if (r._auto) { r.x = r.y = null; delete r._auto; } rebuildZones(); drawRooms(); drawGroups(); results(); draw(); });
-    b.querySelectorAll('[data-rd]').forEach(x => x.onclick = () => { st.rooms.splice(+x.dataset.rd, 1); st.selRoom = 0; rebuildZones(); drawRooms(); results(); draw(); });
+    b.querySelectorAll('[data-rd]').forEach(x => x.onclick = () => { st.rooms.splice(+x.dataset.rd, 1); st.selRoom = 0; st.hlRoom = -1; rebuildZones(); drawRooms(); results(); draw(); });
   }
   $('#dRoomAdd').onclick = () => { st.rooms.push({ name: 'Помещение ' + (st.rooms.length + 1), S: null, x: null, y: null }); st.selRoom = st.rooms.length - 1; setTool('room'); drawRooms(); };
   $('#dRoomAuto').onclick = () => autoRooms().then(() => results());
@@ -191,6 +262,8 @@
         <div class="row" style="gap:5px;align-items:center"><input type="checkbox" data-son="${i}" ${s.on ? 'checked' : ''} style="width:auto"><canvas data-th="${i}" width="40" height="28" style="border:2px solid ${s.color};border-radius:4px;background:#fff"></canvas>
         <input data-sl="${i}" value="${esc(s.label)}" style="flex:1;font-size:12px"><button class="b ghost sm" data-sx="${i}" title="удалить образец">✕</button></div>
         ${(s.extra || []).length ? `<div style="margin:2px 0 0 24px;font-size:11px" class="mute">ещё образцы: ${s.extra.map((e, k) => `<canvas data-ex="${i}:${k}" width="28" height="20" style="border:1px solid ${s.color};border-radius:3px;vertical-align:middle;background:#fff"></canvas><a href="#" data-exd="${i}:${k}" title="убрать этот образец" style="font-size:11px">✕</a>`).join(' ')}</div>` : ''}
+        ${s.seg > 0 ? `<div style="font-size:12px;margin:2px 0 0 24px">лента: ${found} сегм. × ${Math.round(s.seg * 1000)} мм = <b>${(found * s.seg).toFixed(1)} м</b> → ${Math.ceil(found * s.seg / (s.reel || 5) - 1e-6)} бухт по ${s.reel || 5} м (в КП — бухты, по помещениям с округлением вверх)</div>` : ''}
+        ${s.vec ? `<div class="mute" style="font-size:11px;margin:0 0 0 24px">из объектов DWG${s.block ? ': блок «' + esc(s.block.slice(0, 30)) + '»' : ''} — счёт точный</div>` : ''}
         <div style="font-size:12px;margin:2px 0 0 24px">найдено <b>${found}</b>${s.qty != null ? ` из ${s.qty} по экспликации${found !== s.qty && st.dets.length ? ` <span style="color:#c0392b">(${found > s.qty ? '+' : ''}${found - s.qty})</span>` : ''}` : ''}</div>
         <div style="margin:2px 0 0 24px">${map}</div></div>`;
     }).join('');
@@ -219,7 +292,7 @@
     const k = byC.size && byC.tplSize ? (byC.size + 2) / (byC.tplSize + 2) : 1;
     if (SYM.cfg.rescale !== false && Math.abs(k - 1) > 0.08 && k > 0.3 && k < 3) {
       prog('Уточняю образцы…');
-      const cv2 = await SYM.render(st.doc, st.page, SC * k), ink2 = SYM.ink(cv2), rgb2 = SYM.rgbOf(cv2);
+      const cv2 = await renderPage(SC * k), ink2 = SYM.ink(cv2), rgb2 = SYM.rgbOf(cv2);
       const bbs = act.map(o => { const b = o.s.bb, m = 3; return SYM.cropIcon(ink2, { x0: b.x * k - m, x1: (b.x + b.w) * k + m, y0: b.y * k - m, y1: (b.y + b.h) * k + m }) || { x: Math.round(b.x * k), y: Math.round(b.y * k), w: Math.max(4, Math.round(b.w * k)), h: Math.max(4, Math.round(b.h * k)) }; });
       st._tpl = { cv2, bbs, k }; byC = SYM.findByColor(st.rgb, st.cv.width, st.cv.height, st.ink, act.map(o => o.s), st.region, { rgb: rgb2, W: cv2.width, ink: ink2, bbs });
     }
@@ -262,7 +335,7 @@
     found.sort((a, b) => (b.c || 0) - (a.c || 0)); { const keep = []; for (const d of found) if (!keep.some(o => near(o, d))) keep.push(d); found = keep; }
     const allS = st.samples.flatMap(s => [s.bb, ...(s.extra || []).map(e => e.bb)]);
     found = found.filter(d => !(st.exclude || []).some(e => d.x + d.w / 2 > e.x0 && d.x + d.w / 2 < e.x1 && d.y + d.h / 2 > e.y0 && d.y + d.h / 2 < e.y1)).filter(d => !st.samples.some(s => d.x < s.bb.x + s.bb.w && d.x + d.w > s.bb.x && d.y < s.bb.y + s.bb.h && d.y + d.h > s.bb.y));
-    if (!append) { st.dets = found; st.rejected = []; }
+    if (!append) { st.dets = st.dets.filter(d => d.vec && st.samples[d.ti] && st.samples[d.ti].vec).concat(found.filter(d => !st.samples[d.ti] || !st.samples[d.ti].vec)); st.rejected = []; }
     else { // добавить только новое: не там, где уже есть значок, и не там, где значок удалён вручную
       found = found.filter(d => !st.dets.some(o => near(o, d)) && !(st.rejected || []).some(o => near(o, d)));
       if (found.length > Math.max(150, st.dets.length * 1.5)) throw new Error(`по новому образцу нашлось ${found.length} совпадений — он похож на линии плана, а не на значок. Уберите этот образец (✕ у миниатюры) и обведите значок плотнее, без соседних линий`);
@@ -270,8 +343,8 @@
     assignRooms(); return found.length;
   }
   $('#dFind').onclick = async () => {
-    const act = st.samples.map((s, i) => ({ s, i })).filter(o => o.s.on).flatMap(o => tplsOf(o.s, o.i));
-    if (!act.length) { setMsg('Нет образцов для поиска.'); return; }
+    const act = st.samples.map((s, i) => ({ s, i })).filter(o => o.s.on && !o.s.vec).flatMap(o => tplsOf(o.s, o.i));
+    if (!act.length) { setMsg(st.samples.some(s => s.vec) ? 'Все позиции посчитаны по объектам DWG. Чтобы искать по картинке — обведите значок инструментом «▭ образец».' : 'Нет образцов для поиска.'); return; }
     $('#dFind').disabled = true; prog('Ищу значки… 0%');
     try { await runFind(act, false); st.samples.forEach(s => (s.extra || []).forEach(e => { e.used = true; }));
       setMsg(`Найдено значков: ${st.dets.length}. Сверьте с экспликацией (справа), удалите лишние («✕ значок»), добавьте пропущенные («＋ значок»). Не нашлась часть значков одной позиции — «⊕ ещё образец» по пропущенному значку и «Найти ещё».`);
@@ -309,10 +382,10 @@
       x.fillStyle = '#000'; x.font = `bold ${fs}px system-ui, sans-serif`; x.fillText(`Найдено по чертежу · лист ${st.page}`, bx + fs * 0.6, by + fs * 1.3); x.font = `${fs}px system-ui, sans-serif`;
       lines.forEach((l, k) => { const yy = by + fs * 1.3 + (k + 1) * fs * 1.35; x.strokeStyle = l.col; x.lineWidth = lw * (l.frame ? 2.2 : 1.6); x.strokeRect(bx + fs * 0.6, yy - fs * 0.8, fs * 1.2, fs * 0.9); x.fillStyle = '#000'; x.fillText(l.t, bx + fs * 2.2, yy); });
       if (!window.jspdf) await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = (window.DOC_VENDOR && DOC_VENDOR.jspdf) || 'vendor/jspdf.umd.min.js'; sc.onload = ok; sc.onerror = () => no(new Error('не загрузился jsPDF')); document.head.appendChild(sc); });
-      const pg = await st.doc.getPage(st.page), vp = pg.getViewport({ scale: 1 }), mm = v => v * 25.4 / 72, pw = mm(vp.width), ph = mm(vp.height);
+      const vp = st.dwg ? { width: W / SC, height: H / SC } : (await st.doc.getPage(st.page)).getViewport({ scale: 1 }), mm = v => v * 25.4 / 72, pw = mm(vp.width), ph = mm(vp.height);
       const doc = new window.jspdf.jsPDF({ orientation: pw > ph ? 'l' : 'p', unit: 'mm', format: [pw, ph] });
       doc.addImage(c.toDataURL('image/jpeg', 0.88), 'JPEG', 0, 0, pw, ph);
-      const blob = doc.output('blob'), name = `Лист_${st.page}_разметка.pdf`;
+      const blob = doc.output('blob'), name = st.dwg ? `${st.dwg.name.replace(/\.(dwg|dxf)$/i, '')}_разметка.pdf` : `Лист_${st.page}_разметка.pdf`;
       if (!(await MTUI.saveFile(name, blob))) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); }
       setMsg('PDF с разметкой сохранён: ' + name);
     } catch (err) { setMsg('PDF не получился: ' + err.message); }
@@ -344,6 +417,7 @@
     ctx.save(); ctx.translate(st.view.x, st.view.y); ctx.scale(st.view.s, st.view.s);
     ctx.imageSmoothingEnabled = true; ctx.drawImage(st.cv, 0, 0);
     const lw = 1.5 / st.view.s;
+    if (st.hlRoom >= 0 && st.rooms[st.hlRoom]) { const hc = roomHl(st.hlRoom); if (hc) { ctx.save(); ctx.imageSmoothingEnabled = true; ctx.drawImage(hc.cv, 0, 0, hc.cv.width * hc.g, hc.cv.height * hc.g); ctx.restore(); } }
     (st.exclude || []).forEach(e => { ctx.fillStyle = 'rgba(0,0,0,.06)'; ctx.fillRect(e.x0, e.y0, e.x1 - e.x0, e.y1 - e.y0); });
     if (st.region) { ctx.strokeStyle = 'rgba(0,120,255,.5)'; ctx.setLineDash([8 / st.view.s, 6 / st.view.s]); ctx.lineWidth = lw; ctx.strokeRect(st.region.x0, st.region.y0, st.region.x1 - st.region.x0, st.region.y1 - st.region.y0); ctx.setLineDash([]); }
     st.samples.forEach(s => { ctx.strokeStyle = s.color; ctx.lineWidth = lw * 1.5; ctx.strokeRect(s.bb.x, s.bb.y, s.bb.w, s.bb.h); });
@@ -440,6 +514,8 @@
   function counts() {
     const c = {}; // room → ti → n
     for (const d of st.dets) { const s = st.samples[d.ti]; if (!s || !s.on || d.off) continue; const r = roomName(d.room); (c[r] = c[r] || {})[d.ti] = (c[r][d.ti] || 0) + 1; }
+    // лента из сегментов (DIALux): сегменты → метры → бухты
+    for (const r in c) for (const ti in c[r]) { const s = st.samples[ti]; if (s && s.seg > 0) c[r][ti] = Math.ceil(c[r][ti] * s.seg / (s.reel || 5) - 1e-6); }
     return c;
   }
   /** Рамки: группы значков вплотную; подпись «Р-0N» рядом с группой задаёт число постов (и помещение группы). */
@@ -496,7 +572,7 @@
       for (const r of rooms) { const R = st.rooms.find(x => x.name === r); rr.push({ name: r, S: R && R.S ? R.S : '', H: 2.75 });
         act.forEach(o => { const n = finalN(r, o.i, (c[r] || {})[o.i] || 0), x = MT.get(o.s.a); if (!(n > 0) || !x) return; const k = MT.kind(x);
           rws.push({ room: r, a: x.a, qty: n, note: 'по чертежу: ' + o.s.label, group: ['встраиваемый', 'накладной', 'потолочный', 'трековый'].includes(k) ? 'Общий свет' : k === 'настенный' ? 'Бра' : 'Декоративный свет' });
-          const cap = MT.features(x).cap; if (cap && /GU10|GX53/.test(cap)) { const src = (MT.sourceList(cap) || []).find(s => !s.dim && !s.module && s.ang <= 60) || (MT.sourceList(cap) || [])[0]; if (src) rws.push({ room: r, a: src.a, qty: n * (x.nl || 1), note: 'лампа', group: 'Общий свет' }); } }); }
+          const cap = MT.features(x).cap; if (o.s.lamp && MT.get(o.s.lamp)) rws.push({ room: r, a: MT.get(o.s.lamp).a, qty: n * (x.nl || 1), note: 'лампа (из проекта)', group: 'Общий свет' }); else if (cap && /GU10|GX53/.test(cap)) { const src = (MT.sourceList(cap) || []).find(s => !s.dim && !s.module && s.ang <= 60) || (MT.sourceList(cap) || [])[0]; if (src) rws.push({ room: r, a: src.a, qty: n * (x.nl || 1), note: 'лампа', group: 'Общий свет' }); } }); }
       const miss = act.filter(o => !MT.get(o.s.a)).map(o => o.s.label); if (miss.length) setMsg('Не выбрана модель для: ' + miss.join('; ') + ' — они не попали в проект.');
       if (add && PROJECT.data) { const d = PROJECT.data; rr.forEach(r => { if (!d.rooms.some(x => x.name === r.name)) d.rooms.push(r); }); d.rows = d.rows.filter(x => !(String(x.note || '').startsWith('по чертежу') && rr.some(r => r.name === x.room))).concat(rws); PROJECT.sync(); }
       else PROJECT.set(rr, rws, 'по чертежу');
@@ -505,7 +581,7 @@
     const tk = $('#dToK'); if (tk) tk.onclick = () => {
       const L = act.filter(o => o.s.kind === 'light'), cnt = {};
       for (const r of rooms) L.forEach((o, j) => { const n = finalN(r, o.i, (c[r] || {})[o.i] || 0); if (n > 0) (cnt[r] = cnt[r] || {})[j] = n; });
-      KPM.setFromDrawing(L.map(o => ({ label: o.s.label, a: o.s.a, why: o.s.why, manual: o.s.manualA })), cnt, rooms.map(r => { const R = st.rooms.find(x => x.name === r); return { name: r, S: R && R.S ? R.S : '' }; }));
+      KPM.setFromDrawing(L.map(o => ({ label: o.s.label, a: o.s.a, why: o.s.why, manual: o.s.manualA, lamp: o.s.lamp })), cnt, rooms.map(r => { const R = st.rooms.find(x => x.name === r); return { name: r, S: R && R.S ? R.S : '' }; }));
       showTab('kpm'); MTUI.toast && MTUI.toast('Светильники переданы в «КП Maytoni»');
     };
   }

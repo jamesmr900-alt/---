@@ -181,7 +181,7 @@
     const clear = (x0, y0, x1, y1) => { const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0)); let wall = 0; for (let i = 1; i < n; i++) { const x = Math.round(x0 + (x1 - x0) * i / n), y = Math.round(y0 + (y1 - y0) * i / n); if (m[y * w + x]) { if (++wall > 1) return false; } else wall = 0; } return true; };
     return { lab, w, h, ds, at(px, py) {
       // сначала — ближайшая метка «в прямой видимости» (без стены между значком и меткой), иначе — по пути в обход стен
-      const qx = px / ds, qy = py / ds; let bi = -1, bd = 1e9; L.forEach(([lx, ly], i) => { const d = Math.hypot(lx - qx, ly - qy); if (d < bd && clear(qx, qy, lx, ly)) { bd = d; bi = i; } }); if (bi >= 0) return bi;
+      const qx = px / ds, qy = py / ds, ord = L.map(([lx, ly], i) => [Math.hypot(lx - qx, ly - qy), i]).sort((p, q) => p[0] - q[0]); for (const [, i] of ord) if (clear(qx, qy, L[i][0], L[i][1])) return i;
       let x = Math.round(px / ds), y = Math.round(py / ds);
       for (let r = 0; r < 10; r++) for (let j = -r; j <= r; j++) for (let k = -r; k <= r; k++) { const nx = x + k, ny = y + j; if (nx >= 0 && ny >= 0 && nx < w && ny < h && lab[ny * w + nx] >= 0) return lab[ny * w + nx]; }
       return -1; } };
